@@ -12,11 +12,15 @@ export function SparkBar({ weeks, minStock, leadTimeHorizon }: SparkBarProps) {
   const ltWeeks = weeks.filter((w) => w.weekStart <= leadTimeHorizon);
   if (ltWeeks.length === 0) return null;
 
+  const vals = ltWeeks.map((w) => w.netPosition);
+  const maxV = Math.max(...vals.map(Math.abs), 1);
+
   return (
     <div className="flex items-end gap-[2px] h-5">
-      {ltWeeks.map((w, i) => {
-        const isNeg = w.netPosition < 0;
-        const isWarn = !isNeg && minStock > 0 && w.netPosition < minStock;
+      {vals.map((v, i) => {
+        const h = Math.max(2, (Math.abs(v) / maxV) * 18);
+        const isNeg = v < 0;
+        const isWarn = !isNeg && minStock > 0 && v < minStock;
 
         return (
           <div
@@ -24,7 +28,7 @@ export function SparkBar({ weeks, minStock, leadTimeHorizon }: SparkBarProps) {
             className="rounded-sm"
             style={{
               width: 5,
-              height: 14,
+              height: h,
               backgroundColor: isNeg
                 ? "#C52026"
                 : isWarn
