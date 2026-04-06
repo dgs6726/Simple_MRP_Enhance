@@ -30,7 +30,7 @@ const C = {
   min: 62,
   max: 62,
   excess: 68,
-  trend: 90,
+  trend: 140,
   week: 72,
 } as const;
 
@@ -131,7 +131,7 @@ function renderRow(
         <div className={`py-2 px-2 text-right font-mono text-[11px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`} style={{ width: C.excess }}>
           {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
         </div>
-        <div className="py-2 px-1 text-center shrink-0" style={{ width: C.trend }}>
+        <div className="py-2 px-1 text-center shrink-0 overflow-hidden" style={{ width: C.trend }}>
           <SparkBar weeks={item.weeks} minStock={item.minStock} maxStock={item.maxStock} leadTimeHorizon={item.leadTimeHorizon} />
         </div>
         {allWeeks.map((ws, idx) => {
