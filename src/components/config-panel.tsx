@@ -84,11 +84,14 @@ export function ConfigPanel({ branch, onConfigChanged }: ConfigPanelProps) {
 
     updateItemConfig(branch, editing.component, editing.field, newValue);
 
-    // Update local state
+    // Update local state including userEdited tracking
     setConfigs((prev) =>
       prev.map((c) => {
         if (c.component !== editing.component) return c;
-        return { ...c, [editing.field]: newValue };
+        const userEdited = c.userEdited.includes(editing.field)
+          ? c.userEdited
+          : [...c.userEdited, editing.field];
+        return { ...c, [editing.field]: newValue, userEdited };
       })
     );
 
