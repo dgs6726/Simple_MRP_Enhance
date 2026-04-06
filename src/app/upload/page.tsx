@@ -127,7 +127,8 @@ export default function UploadPage() {
 
     setTimeout(() => {
       try {
-        let rows = parseMrpCsv(text);
+        const parseResult = parseMrpCsv(text);
+        let rows = parseResult.rows;
 
         // Pre-filter PKG items at build time
         if (excludePkg) {
@@ -143,6 +144,12 @@ export default function UploadPage() {
         saveRawRows(rows);
 
         const snapshot = buildSnapshot(rows, 2, leadTimes);
+
+        // Override snapshot date with the MRP run date if available
+        if (parseResult.snapshotDate) {
+          snapshot.snapshotDate = parseResult.snapshotDate;
+        }
+
         saveSnapshot(snapshot);
         setSnapshots(getSnapshots());
         setActiveId(snapshot.id);

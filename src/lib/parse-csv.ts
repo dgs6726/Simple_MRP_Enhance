@@ -2,23 +2,27 @@ import Papa from "papaparse";
 import type { MrpDetailRow } from "./types";
 
 function parseNum(val: string | undefined | null): number {
-  if (val == null || val === "" || val === "#N/A" || val === "#VALUE!" || val === "#DIV/0!") return 0;
+  if (
+    val == null ||
+    val === "" ||
+    val === "#N/A" ||
+    val === "#VALUE!" ||
+    val === "#DIV/0!"
+  )
+    return 0;
   const n = parseFloat(val.replace(/[,$]/g, ""));
   return isNaN(n) ? 0 : n;
 }
 
 /** Convert Excel serial date number to ISO date string */
 function excelSerialToDate(serial: number): string {
-  if (!serial || serial < 1) return "";
-  // Excel epoch: Jan 0, 1900 (with the Lotus 1-2-3 leap year bug)
-  // JS epoch: Jan 1, 1970
-  // Days between: 25569
+  if (!serial || serial < 1000) return ""; // filter out non-date values
   const msPerDay = 86400000;
   const d = new Date((serial - 25569) * msPerDay);
+  if (isNaN(d.getTime())) return "";
   return d.toISOString().split("T")[0];
 }
 
-/** Parse ISO date string (YYYY-MM-DD) or other date formats */
 function parseDate(val: string | undefined | null): string {
   if (!val) return "";
   const d = new Date(val);
@@ -26,24 +30,40 @@ function parseDate(val: string | undefined | null): string {
   return d.toISOString().split("T")[0];
 }
 
-/**
- * Detect which CSV format we're dealing with and parse accordingly.
- * - Old format: has "Final Sort", "RunTotal", "Inventory.Std Cost" columns
- * - New format: has "LastReceipt", "Net & Orders", "DOS" columns
- */
-export function parseMrpCsv(csvText: string): MrpDetailRow[] {
-  // Check if this is the new format by looking for its unique headers
-  const firstLine = csvText.split("\n")[0];
-  const isNewFormat =
-    firstLine.includes("Net & Orders") || firstLine.includes("LastReceipt");
-
-  if (isNewFormat) {
-    return parseNewFormat(csvText);
-  }
-  return parseOldFormat(csvText);
+export interface ParseResult {
+  rows: MrpDetailRow[];
+  snapshotDate: string;
 }
 
-/** Parse the original MRP export format */
+/**
+ * Detect which CSV format and parse accordingly.
+ * Returns parsed rows and the snapshot/run date.
+ */
+export function parseMrpCsv(csvText: string): ParseResult {
+  const lines = csvText.split("\n");
+  const firstLine = lines[0] || "";
+
+  // New format v2: has metadata header starting with "Version"
+  if (firstLine.startsWith("Version")) {
+    return parseNewFormatV2(lines);
+  }
+
+  // New format v1: has "Net & Orders" / "LastReceipt" but no metadata header
+  if (firstLine.includes("Net & Orders") || firstLine.includes("LastReceipt")) {
+    return {
+      rows: parseNewFormatV1(csvText),
+      snapshotDate: "", // will be derived from data
+    };
+  }
+
+  // Old format
+  return {
+    rows: parseOldFormat(csvText),
+    snapshotDate: "", // will be derived from data
+  };
+}
+
+/** Parse old "Detailed MRP" export */
 function parseOldFormat(csvText: string): MrpDetailRow[] {
   const result = Papa.parse(csvText, {
     header: true,
@@ -69,15 +89,41 @@ function parseOldFormat(csvText: string): MrpDetailRow[] {
   }));
 }
 
-/** Parse the new MRP Demand CSV format */
-function parseNewFormat(csvText: string): MrpDetailRow[] {
-  // The new format has 2 header rows: row 1 = display headers, row 2 = type hints
-  // Skip row 2 by removing it before parsing
+/** Parse new format v1 (no metadata header, data headers on row 1) */
+function parseNewFormatV1(csvText: string): MrpDetailRow[] {
   const lines = csvText.split("\n");
   if (lines.length < 3) return [];
+  // Skip type-hint row (row 2)
   const cleanedCsv = [lines[0], ...lines.slice(2)].join("\n");
+  return parseNewFormatRows(cleanedCsv);
+}
 
-  const result = Papa.parse(cleanedCsv, {
+/** Parse new format v2 (metadata header on rows 1-2, data headers on row 3) */
+function parseNewFormatV2(lines: string[]): ParseResult {
+  if (lines.length < 5) return { rows: [], snapshotDate: "" };
+
+  // Row 1: Version,,,,,,Date,Buffer,...
+  // Row 2: 2,,,,,,46114,30,...
+  const metaRow = Papa.parse(lines[1], { header: false }).data[0] as string[];
+  const runDateSerial = parseNum(metaRow?.[6]); // column 7 = Date
+  const snapshotDate = excelSerialToDate(runDateSerial);
+
+  // Data starts at row 3 (headers) + row 4 (type hints) + row 5 (data)
+  // Skip rows 0-1 (metadata) and row 3 (type hints = index 3)
+  const cleanedCsv = [lines[2], ...lines.slice(4)].join("\n");
+  let rows = parseNewFormatRows(cleanedCsv);
+
+  // Collapse past-due rows into the run date
+  if (snapshotDate) {
+    rows = collapsePastDueRows(rows, snapshotDate);
+  }
+
+  return { rows, snapshotDate };
+}
+
+/** Shared row parser for both new format variants */
+function parseNewFormatRows(csvText: string): MrpDetailRow[] {
+  const result = Papa.parse(csvText, {
     header: true,
     skipEmptyLines: true,
     transformHeader: (h: string) => h.trim(),
@@ -99,24 +145,23 @@ function parseNewFormat(csvText: string): MrpDetailRow[] {
     const openOrders = parseNum(raw["Open Orders"]);
     const dueSerial = parseNum(raw["Due"]);
     const date = excelSerialToDate(dueSerial);
+    if (!date) return; // skip rows with invalid dates
+
     const qoh = parseNum(raw["QOH"]);
     const netAndOrders = parseNum(raw["Net & Orders"]);
-    const stdCost = parseNum(raw["Net"]); // "Net" column in new format = unit cost
+    const stdCost = parseNum(raw["Net"]); // "Net" column = unit cost in new format
     const vendor = raw["Vendor"]?.trim() || "";
 
-    // Derive finalSort:
-    // PO/Inventory row: Open Orders > 0 and parent starts with "WH"
-    // Demand row: Demand > 0
-    // First row per item with WH parent and no demand = inventory snapshot
+    // Derive row type
     let finalSort: number;
     if (openOrders > 0 && parentPart.startsWith("WH")) {
       finalSort = 4; // Open PO
     } else if (demand > 0) {
       finalSort = 2; // Demand
-    } else if (parentPart.startsWith("WH")) {
-      finalSort = 1; // Inventory (first row, QOH record)
+    } else if (parentPart.startsWith("WH") && openOrders === 0 && demand === 0) {
+      finalSort = 1; // Inventory
     } else {
-      finalSort = 2; // Default to demand
+      finalSort = 2;
     }
 
     rows.push({
@@ -126,18 +171,35 @@ function parseNewFormat(csvText: string): MrpDetailRow[] {
       parentPart,
       date,
       qoh,
-      // Demand: new format has positive values, convert to negative for internal consistency
       demand: finalSort === 2 && demand > 0 ? -demand : 0,
       openOrders: finalSort === 4 ? openOrders : 0,
-      // Net: use "Net & Orders" as the running net position
       net: netAndOrders,
-      runTotal: 0, // Not available in new format
+      runTotal: 0,
       finalSort,
       index: idx,
       stdCost,
-      extendedCost: 0, // Not available in new format
+      extendedCost: 0,
     });
   });
 
   return rows;
+}
+
+/**
+ * Collapse past-due transactions into the run date.
+ * For each item, any demand/PO rows dated before the run date
+ * get their date shifted to the run date. This keeps the economic
+ * impact (past-due orders still count) without creating old columns.
+ * Inventory rows (finalSort=1) always get set to the run date.
+ */
+function collapsePastDueRows(
+  rows: MrpDetailRow[],
+  runDate: string
+): MrpDetailRow[] {
+  return rows.map((row) => {
+    if (row.date < runDate) {
+      return { ...row, date: runDate };
+    }
+    return row;
+  });
 }
