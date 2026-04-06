@@ -6,12 +6,13 @@ import {
   Upload,
   LayoutGrid,
   ListChecks,
-  AlertTriangle,
+  Settings,
 } from "lucide-react";
 import { getActiveSnapshot } from "@/lib/store";
 import { fmtCurrency, fmtDateLong } from "@/lib/format";
 import { MrpGrid } from "@/components/mrp-grid";
 import { ActionsPanel } from "@/components/actions-panel";
+import { ConfigPanel } from "@/components/config-panel";
 import type { MrpSnapshot } from "@/lib/types";
 
 const BRANCH_NAMES: Record<number, string> = {
@@ -20,7 +21,7 @@ const BRANCH_NAMES: Record<number, string> = {
   3: "Pulaski",
 };
 
-type ViewTab = "grid" | "actions";
+type ViewTab = "grid" | "actions" | "config";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -120,7 +121,7 @@ export default function DashboardPage() {
               Branch {snapshot.branch} &mdash;{" "}
               {BRANCH_NAMES[snapshot.branch] || "Unknown"} &middot; As of{" "}
               {fmtDateLong(snapshot.snapshotDate)}{" "}
-              &middot; <span className="text-cm-gray-med">v0.6.0</span>
+              &middot; <span className="text-cm-gray-med">v0.7.0</span>
             </p>
           </div>
         </div>
@@ -224,14 +225,33 @@ export default function DashboardPage() {
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab("config")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+            activeTab === "config"
+              ? "border-cm-red text-cm-charcoal"
+              : "border-transparent text-cm-gray-light hover:text-cm-gray-med"
+          }`}
+        >
+          <Settings className="w-3.5 h-3.5" />
+          Item Config
+        </button>
       </div>
 
       {/* Content */}
       <div className="flex-1">
         {activeTab === "grid" ? (
           <MrpGrid items={snapshot.items} snapshotDate={snapshot.snapshotDate} />
-        ) : (
+        ) : activeTab === "actions" ? (
           <ActionsPanel items={snapshot.items} />
+        ) : (
+          <ConfigPanel
+            branch={snapshot.branch}
+            onConfigChanged={() => {
+              // Reload snapshot to reflect config changes
+              // (user would need to re-upload MRP to fully recalculate)
+            }}
+          />
         )}
       </div>
     </div>

@@ -20,10 +20,18 @@ import {
   setActiveSnapshotId,
   getActiveSnapshotId,
   deleteSnapshot,
-  saveLeadTimes,
-  getLeadTimes,
-  hasLeadTimes,
 } from "@/lib/store";
+import {
+  hasItemConfigs,
+  initConfigsFromUpload,
+  mergeConfigsFromUpload,
+  getItemConfigs,
+  configsToLeadTimeMap,
+  getUploadSettings,
+  saveUploadSettings,
+  MERGEABLE_FIELDS,
+  type MergeableField,
+} from "@/lib/item-config";
 import { fmtDateLong } from "@/lib/format";
 import type { MrpSnapshot } from "@/lib/types";
 
@@ -40,28 +48,73 @@ export default function UploadPage() {
   } | null>(null);
   const [ltResult, setLtResult] = useState<{
     count: number;
+    added: number;
+    updated: number;
   } | null>(null);
-  const [hasLT, setHasLT] = useState(false);
+  const [hasConfig, setHasConfig] = useState(false);
+  const [excludePkg, setExcludePkg] = useState(true);
+
+  // Merge dialog state
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [pendingLeadTimes, setPendingLeadTimes] = useState<Map<
+    string,
+    import("@/lib/types").LeadTimeData
+  > | null>(null);
+  const [selectedFields, setSelectedFields] = useState<
+    Set<MergeableField>
+  >(new Set(MERGEABLE_FIELDS.map((f) => f.key)));
 
   useEffect(() => {
     setSnapshots(getSnapshots());
     setActiveId(getActiveSnapshotId());
-    setHasLT(hasLeadTimes());
+    setHasConfig(hasItemConfigs(2));
+    const settings = getUploadSettings();
+    setExcludePkg(settings.excludePkg);
   }, []);
 
   const handleLeadTimesAccepted = (text: string) => {
+    const data = parseLeadTimesCsv(text);
+
+    if (hasConfig) {
+      // Existing config — show merge dialog
+      setPendingLeadTimes(data);
+      setShowMergeDialog(true);
+    } else {
+      // First time — just initialize
+      setIsProcessingLT(true);
+      setTimeout(() => {
+        try {
+          initConfigsFromUpload(2, data);
+          setHasConfig(true);
+          setLtResult({ count: data.size, added: data.size, updated: 0 });
+        } catch (err) {
+          console.error("Failed to process lead times:", err);
+        } finally {
+          setIsProcessingLT(false);
+        }
+      }, 50);
+    }
+  };
+
+  const handleMergeConfirm = () => {
+    if (!pendingLeadTimes) return;
     setIsProcessingLT(true);
-    setLtResult(null);
+    setShowMergeDialog(false);
     setTimeout(() => {
       try {
-        const data = parseLeadTimesCsv(text);
-        saveLeadTimes(data);
-        setHasLT(true);
-        setLtResult({ count: data.size });
+        const fieldsArr = Array.from(selectedFields);
+        const result = mergeConfigsFromUpload(2, pendingLeadTimes, fieldsArr);
+        setHasConfig(true);
+        setLtResult({
+          count: pendingLeadTimes.size,
+          added: result.added,
+          updated: result.updated,
+        });
       } catch (err) {
-        console.error("Failed to parse lead times:", err);
+        console.error("Failed to merge lead times:", err);
       } finally {
         setIsProcessingLT(false);
+        setPendingLeadTimes(null);
       }
     }, 50);
   };
@@ -69,10 +122,22 @@ export default function UploadPage() {
   const handleMrpAccepted = (text: string) => {
     setIsProcessing(true);
     setLastResult(null);
+    saveUploadSettings({ excludePkg });
+
     setTimeout(() => {
       try {
-        const rows = parseMrpCsv(text);
-        const leadTimes = getLeadTimes();
+        let rows = parseMrpCsv(text);
+
+        // Pre-filter PKG items at build time
+        if (excludePkg) {
+          rows = rows.filter((r) => !r.component.startsWith("PKG"));
+        }
+
+        // Use item configs as the source of truth for planning parameters
+        const configs = getItemConfigs(2);
+        const leadTimes =
+          configs.size > 0 ? configsToLeadTimeMap(configs) : undefined;
+
         const snapshot = buildSnapshot(rows, 2, leadTimes);
         saveSnapshot(snapshot);
         setSnapshots(getSnapshots());
@@ -105,6 +170,15 @@ export default function UploadPage() {
     setActiveId(getActiveSnapshotId());
   };
 
+  const toggleField = (field: MergeableField) => {
+    setSelectedFields((prev) => {
+      const next = new Set(prev);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
@@ -127,7 +201,7 @@ export default function UploadPage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-6 py-8">
-        {/* Step 1: Lead Times */}
+        {/* Step 1: Planning Parameters */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-6 h-6 rounded-full bg-cm-charcoal text-white text-xs font-bold flex items-center justify-center">
@@ -135,20 +209,20 @@ export default function UploadPage() {
             </div>
             <h2 className="text-sm font-semibold text-cm-charcoal">
               Planning Parameters
-              {hasLT && (
+              {hasConfig && (
                 <span className="ml-2 text-xs font-normal text-cm-green">
-                  (loaded)
+                  (configured)
                 </span>
               )}
             </h2>
             <Settings2 className="w-4 h-4 text-cm-gray-light" />
           </div>
           <p className="text-xs text-cm-gray-light mb-3 ml-8">
-            Upload your Lead Times / SOQs CSV. This provides Min, Max, Safety
-            Stock, Lead Time, SOQ, and customer data per item.{" "}
-            {hasLT
-              ? "Already loaded \u2014 re-upload to update."
-              : "Upload this first for the best experience."}
+            Upload your Lead Times / SOQs CSV.{" "}
+            {hasConfig
+              ? "Config exists \u2014 you'll choose which fields to update."
+              : "First upload creates the item configuration."}
+            {" "}Edit individual values on the Item Config tab.
           </p>
           <div className="ml-8">
             <UploadZone
@@ -162,7 +236,9 @@ export default function UploadPage() {
             <div className="ml-8 mt-2 bg-cm-green-bg border border-green-200 rounded-lg px-3 py-2 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-cm-green shrink-0" />
               <span className="text-xs text-green-700">
-                Loaded planning parameters for {ltResult.count} items.
+                {ltResult.added > 0 && `${ltResult.added} items added. `}
+                {ltResult.updated > 0 && `${ltResult.updated} items updated. `}
+                {ltResult.count} total items in file.
               </span>
             </div>
           )}
@@ -182,6 +258,20 @@ export default function UploadPage() {
           <p className="text-xs text-cm-gray-light mb-3 ml-8">
             Upload the Detailed MRP export CSV from Excel.
           </p>
+
+          {/* Settings */}
+          <div className="ml-8 mb-3 flex items-center gap-4">
+            <label className="flex items-center gap-1.5 text-xs text-cm-gray-med cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={excludePkg}
+                onChange={(e) => setExcludePkg(e.target.checked)}
+                className="accent-cm-red w-3.5 h-3.5"
+              />
+              Exclude PKG items (packaging/totes)
+            </label>
+          </div>
+
           <div className="ml-8">
             <UploadZone
               onFileAccepted={handleMrpAccepted}
@@ -260,6 +350,74 @@ export default function UploadPage() {
           </div>
         )}
       </div>
+
+      {/* Merge Dialog Overlay */}
+      {showMergeDialog && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-base font-bold text-cm-charcoal mb-1">
+              Update Planning Parameters
+            </h3>
+            <p className="text-xs text-cm-gray-light mb-4">
+              Item configuration already exists. Select which fields should be
+              overwritten by this upload. Uncheck fields you want to keep at
+              their current values (including manual edits).
+            </p>
+
+            <div className="space-y-2 mb-5">
+              {MERGEABLE_FIELDS.map((field) => (
+                <label
+                  key={field.key}
+                  className="flex items-center gap-2 text-sm cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedFields.has(field.key)}
+                    onChange={() => toggleField(field.key)}
+                    className="accent-cm-red w-4 h-4"
+                  />
+                  <span className="text-cm-charcoal">{field.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowMergeDialog(false);
+                  setPendingLeadTimes(null);
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-cm-gray-med hover:bg-gray-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  // Select all
+                  setSelectedFields(
+                    new Set(MERGEABLE_FIELDS.map((f) => f.key))
+                  );
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-cm-gray-med hover:bg-gray-50 cursor-pointer"
+              >
+                All
+              </button>
+              <button
+                onClick={() => setSelectedFields(new Set())}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-cm-gray-med hover:bg-gray-50 cursor-pointer"
+              >
+                None
+              </button>
+              <button
+                onClick={handleMergeConfirm}
+                className="flex-1 px-4 py-2 bg-cm-red text-white rounded-lg text-sm font-semibold hover:bg-cm-red/90 cursor-pointer"
+              >
+                Update {selectedFields.size} Fields
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
