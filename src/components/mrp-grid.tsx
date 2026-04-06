@@ -29,13 +29,14 @@ const C = {
   lt: 40,
   min: 62,
   max: 62,
-  excess: 68,
+  curExcess: 68,
+  maxExcess: 68,
   trend: 140,
   week: 72,
 } as const;
 
-const FIXED_WIDTH = C.item + C.desc + C.abc + C.qoh + C.lt + C.min + C.max + C.excess + C.trend;
-const COL_COUNT = 9; // number of fixed columns (for colSpan)
+const FIXED_WIDTH = C.item + C.desc + C.abc + C.qoh + C.lt + C.min + C.max + C.curExcess + C.maxExcess + C.trend;
+const COL_COUNT = 10; // number of fixed columns (for colSpan)
 
 function cellColorClass(
   val: number,
@@ -71,6 +72,16 @@ function computeExcessDollars(item: MrpItem): number {
   return excess * item.stdCost;
 }
 
+function computeMaxFutureExcess(item: MrpItem): number {
+  if (item.maxStock <= 0 || item.weeks.length === 0) return 0;
+  let maxExcess = 0;
+  for (const w of item.weeks) {
+    const excess = w.netPosition - item.maxStock;
+    if (excess > maxExcess) maxExcess = excess;
+  }
+  return maxExcess * item.stdCost;
+}
+
 const ROW_HEIGHT = 33;
 const EXPANDED_HEIGHT = 400;
 
@@ -83,6 +94,7 @@ function renderRow(
 ) {
   const hasShortage = item.exceptions.includes("SHORTAGE");
   const excessDollars = computeExcessDollars(item);
+  const maxExcess = computeMaxFutureExcess(item);
   const stickyBg = isExpanded
     ? "bg-gray-100"
     : hasShortage
@@ -128,8 +140,11 @@ function renderRow(
         <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med shrink-0" style={{ width: C.max }}>
           {fmt(item.maxStock)}
         </div>
-        <div className={`py-2 px-2 text-right font-mono text-[11px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`} style={{ width: C.excess }}>
+        <div className={`py-2 px-2 text-right font-mono text-[11px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`} style={{ width: C.curExcess }}>
           {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
+        </div>
+        <div className={`py-2 px-2 text-right font-mono text-[11px] shrink-0 ${maxExcess > 0 ? "text-blue-500" : "text-gray-200"}`} style={{ width: C.maxExcess }}>
+          {maxExcess > 0 ? fmtCurrency(maxExcess) : "\u2014"}
         </div>
         <div className="py-2 px-1 text-center shrink-0 overflow-hidden" style={{ width: C.trend }}>
           <SparkBar weeks={item.weeks} minStock={item.minStock} maxStock={item.maxStock} leadTimeHorizon={item.leadTimeHorizon} />
@@ -172,7 +187,7 @@ interface MrpGridProps {
   snapshotDate: string;
 }
 
-type SortKey = "component" | "description" | "abcClass" | "qoh" | "leadTimeWeeks" | "minStock" | "maxStock" | "excess" | null;
+type SortKey = "component" | "description" | "abcClass" | "qoh" | "leadTimeWeeks" | "minStock" | "maxStock" | "curExcess" | "maxExcess" | null;
 type SortDir = "asc" | "desc";
 
 export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
@@ -238,9 +253,12 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
     return [...exceptionFiltered].sort((a, b) => {
       let av: number | string;
       let bv: number | string;
-      if (sortKey === "excess") {
+      if (sortKey === "curExcess") {
         av = computeExcessDollars(a);
         bv = computeExcessDollars(b);
+      } else if (sortKey === "maxExcess") {
+        av = computeMaxFutureExcess(a);
+        bv = computeMaxFutureExcess(b);
       } else {
         av = a[sortKey];
         bv = b[sortKey];
@@ -334,7 +352,8 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
             { key: "leadTimeWeeks" as SortKey, label: "LT", w: C.lt, align: "text-right" },
             { key: "minStock" as SortKey, label: "Min", w: C.min, align: "text-right" },
             { key: "maxStock" as SortKey, label: "Max", w: C.max, align: "text-right" },
-            { key: "excess" as SortKey, label: "Cur. Excess", w: C.excess, align: "text-right" },
+            { key: "curExcess" as SortKey, label: "Cur. Excess", w: C.curExcess, align: "text-right" },
+            { key: "maxExcess" as SortKey, label: "Max Excess", w: C.maxExcess, align: "text-right" },
             { key: null as SortKey, label: "Trend", w: C.trend, align: "text-center" },
           ].map((col, i) => {
             const isSorted = sortKey === col.key && col.key !== null;
