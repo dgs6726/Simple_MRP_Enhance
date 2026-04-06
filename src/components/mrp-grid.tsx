@@ -4,7 +4,6 @@ import {
   useState,
   useMemo,
   useCallback,
-  memo,
   useRef,
   useEffect,
   startTransition,
@@ -55,11 +54,12 @@ function computeExcessDollars(item: MrpItem): number {
   return excess * item.stdCost;
 }
 
-const COL_COUNT = 9;
-const ROW_HEIGHT = 33; // px per collapsed row
-const EXPANDED_HEIGHT = 400; // estimated px for expanded row
+const COL_COUNT = 11;
+const ROW_HEIGHT = 33;
+const EXPANDED_HEIGHT = 400;
+const MIN_ROW_WIDTH_PX = 75;
+const WEEK_COL_PX = 68;
 
-/** Inline row renderer — no memo wrapper needed since virtualizer handles visibility */
 function renderRow(
   item: MrpItem,
   allWeeks: string[],
@@ -69,27 +69,35 @@ function renderRow(
 ) {
   const hasShortage = item.exceptions.includes("SHORTAGE");
   const excessDollars = computeExcessDollars(item);
+  // Explicit bg for sticky columns so they don't show through
+  const stickyBg = isExpanded
+    ? "bg-gray-100"
+    : hasShortage
+      ? "bg-[#fef8f8]"
+      : "bg-white";
 
   return (
     <div>
       <div
         onClick={onToggle}
-        className={`flex cursor-pointer border-b transition-colors ${
+        className={`flex cursor-pointer border-b hover:bg-gray-50 ${
           isExpanded
             ? "bg-gray-100 border-gray-200"
             : hasShortage
-              ? "bg-cm-red/[0.03] border-gray-100 hover:bg-gray-50"
-              : "border-gray-100 hover:bg-gray-50"
+              ? "bg-[#fef8f8] border-gray-100"
+              : "bg-white border-gray-100"
         }`}
-        style={{ minWidth: `${COL_COUNT * 80 + allWeeks.length * 68}px` }}
+        style={{ minWidth: `${COL_COUNT * MIN_ROW_WIDTH_PX + allWeeks.length * WEEK_COL_PX}px` }}
       >
-        <div className="py-2 px-2 pl-6 font-semibold font-mono text-[11px] whitespace-nowrap sticky left-0 bg-inherit z-[5] min-w-[90px] shrink-0">
+        {/* Sticky Item — opaque bg + right border */}
+        <div className={`py-2 px-2 pl-6 font-semibold font-mono text-[11px] whitespace-nowrap sticky left-0 z-[5] min-w-[90px] shrink-0 ${stickyBg} border-r border-gray-100`}>
           <span className="mr-1.5 text-[8px] text-cm-gray-light">
             {isExpanded ? "\u25BC" : "\u25B6"}
           </span>
           {item.component}
         </div>
-        <div className="py-2 px-2 text-cm-gray-med whitespace-nowrap overflow-hidden text-ellipsis min-w-[170px] max-w-[180px] shrink-0 sticky left-[90px] bg-inherit z-[5] text-xs">
+        {/* Sticky Description — opaque bg + right border */}
+        <div className={`py-2 px-2 text-cm-gray-med whitespace-nowrap overflow-hidden text-ellipsis min-w-[170px] max-w-[180px] shrink-0 sticky left-[90px] z-[5] text-xs ${stickyBg} border-r border-gray-200`}>
           {item.description}
         </div>
         <div className="py-2 px-2 text-center min-w-[40px] shrink-0">
@@ -102,18 +110,21 @@ function renderRow(
         <div className="py-2 px-2 text-right font-mono font-medium text-[11px] min-w-[70px] shrink-0">
           {fmt(item.qoh)}
         </div>
-        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[40px] shrink-0">
+        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[35px] shrink-0">
           {item.leadTimeWeeks}w
         </div>
-        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[65px] shrink-0">
+        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[60px] shrink-0">
           {fmt(item.minStock)}
         </div>
+        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[60px] shrink-0">
+          {fmt(item.maxStock)}
+        </div>
         <div
-          className={`py-2 px-2 text-right font-mono text-[11px] min-w-[65px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`}
+          className={`py-2 px-2 text-right font-mono text-[11px] min-w-[60px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`}
         >
           {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
         </div>
-        <div className="py-2 px-2 text-center min-w-[60px] shrink-0">
+        <div className="py-2 px-2 text-center min-w-[55px] shrink-0">
           <SparkBar
             weeks={item.weeks}
             minStock={item.minStock}
@@ -124,7 +135,6 @@ function renderRow(
           const isWithinLT = idx <= ltBoundaryIndex;
           const isLtBoundary = idx === ltBoundaryIndex;
 
-          // Find bucket — linear scan is fine since weeks are pre-sorted
           let netPosition: number | null = null;
           for (const w of item.weeks) {
             if (w.weekStart === ws) {
@@ -191,7 +201,6 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
   const search = useDebouncedValue(searchInput, 200);
   const supplierFilter = useDebouncedValue(supplierInput, 200);
 
-  // Use startTransition for filter changes so the UI stays responsive
   const setHidePkgTransition = useCallback((val: boolean) => {
     startTransition(() => setHidePkg(val));
   }, []);
@@ -269,20 +278,19 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
     return map;
   }, [items, allWeeks]);
 
-  // Virtual scrolling — only render visible rows
   const rowVirtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) =>
-      expanded === filtered[index]?.component
-        ? EXPANDED_HEIGHT
-        : ROW_HEIGHT,
+      expanded === filtered[index]?.component ? EXPANDED_HEIGHT : ROW_HEIGHT,
     overscan: 10,
   });
 
   const handleToggle = useCallback((component: string) => {
     setExpanded((prev) => (prev === component ? null : component));
   }, []);
+
+  const headerMinWidth = `${COL_COUNT * MIN_ROW_WIDTH_PX + allWeeks.length * WEEK_COL_PX}px`;
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 130px)" }}>
@@ -414,14 +422,12 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
         {/* Header row */}
         <div
           className="flex bg-[#F9FAFB] sticky top-0 z-10 border-b border-gray-200"
-          style={{
-            minWidth: `${COL_COUNT * 80 + allWeeks.length * 68}px`,
-          }}
+          style={{ minWidth: headerMinWidth }}
         >
-          <div className="py-2 px-2 pl-6 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap sticky left-0 bg-[#F9FAFB] z-20 min-w-[90px] shrink-0">
+          <div className="py-2 px-2 pl-6 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap sticky left-0 bg-[#F9FAFB] z-20 min-w-[90px] shrink-0 border-r border-gray-100">
             Item
           </div>
-          <div className="py-2 px-2 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider sticky left-[90px] bg-[#F9FAFB] z-20 min-w-[170px] shrink-0">
+          <div className="py-2 px-2 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider sticky left-[90px] bg-[#F9FAFB] z-20 min-w-[170px] shrink-0 border-r border-gray-200">
             Description
           </div>
           <div className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider min-w-[40px] shrink-0">
@@ -430,16 +436,19 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
           <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[70px] shrink-0">
             QOH
           </div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[40px] shrink-0">
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[35px] shrink-0">
             LT
           </div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[65px] shrink-0">
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[60px] shrink-0">
             Min
           </div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[65px] shrink-0">
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[60px] shrink-0">
+            Max
+          </div>
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[60px] shrink-0">
             Excess $
           </div>
-          <div className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider min-w-[60px] shrink-0">
+          <div className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider min-w-[55px] shrink-0">
             Trend
           </div>
           {allWeeks.map((w) => (

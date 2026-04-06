@@ -96,10 +96,14 @@ export default function DashboardPage() {
     0
   );
   const totalExcess = snapshot.items.reduce((sum, i) => {
-    if (i.maxStock <= 0) return sum;
+    if (i.maxStock <= 0 || i.component.startsWith("PKG")) return sum;
     const currentNet = i.weeks.length > 0 ? i.weeks[0].netPosition : i.qoh;
     const excess = Math.max(0, currentNet - i.maxStock);
     return sum + excess * i.stdCost;
+  }, 0);
+  const totalInventoryValue = snapshot.items.reduce((sum, i) => {
+    if (i.component.startsWith("PKG")) return sum;
+    return sum + i.qoh * i.stdCost;
   }, 0);
 
   return (
@@ -116,7 +120,7 @@ export default function DashboardPage() {
               Branch {snapshot.branch} &mdash;{" "}
               {BRANCH_NAMES[snapshot.branch] || "Unknown"} &middot; As of{" "}
               {fmtDateLong(snapshot.snapshotDate)}{" "}
-              &middot; <span className="text-cm-gray-med">v0.5.1</span>
+              &middot; <span className="text-cm-gray-med">v0.6.0</span>
             </p>
           </div>
         </div>
@@ -160,6 +164,15 @@ export default function DashboardPage() {
             </div>
             <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
               Actions
+            </div>
+          </div>
+          <div className="w-px h-8 bg-cm-gray-med" />
+          <div className="text-center">
+            <div className="text-2xl font-bold font-mono text-white">
+              {fmtCurrency(totalInventoryValue)}
+            </div>
+            <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
+              Inventory
             </div>
           </div>
           <div className="w-px h-8 bg-cm-gray-med" />
