@@ -9,7 +9,7 @@ import {
   useEffect,
 } from "react";
 import type { MrpItem, ExceptionFlag } from "@/lib/types";
-import { fmt, fmtWeek } from "@/lib/format";
+import { fmt, fmtWeekWithNum, fmtCurrency } from "@/lib/format";
 import { SparkBar } from "./spark-bar";
 import { DetailPanel } from "./detail-panel";
 
@@ -46,6 +46,17 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
+/** Compute excess $ for an item: max(0, current_net - max) * stdCost */
+function computeExcessDollars(item: MrpItem): number {
+  if (item.maxStock <= 0) return 0;
+  // Use the first week's net position (current state)
+  const currentNet = item.weeks.length > 0 ? item.weeks[0].netPosition : item.qoh;
+  const excess = Math.max(0, currentNet - item.maxStock);
+  return excess * item.stdCost;
+}
+
+const COL_COUNT = 9; // fixed columns before weekly data
+
 const MrpRow = memo(function MrpRow({
   item,
   allWeeks,
@@ -64,6 +75,8 @@ const MrpRow = memo(function MrpRow({
     () => new Map(item.weeks.map((w) => [w.weekStart, w])),
     [item.weeks]
   );
+
+  const excessDollars = useMemo(() => computeExcessDollars(item), [item]);
 
   return (
     <>
@@ -101,6 +114,9 @@ const MrpRow = memo(function MrpRow({
         </td>
         <td className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med">
           {fmt(item.minStock)}
+        </td>
+        <td className={`py-2 px-2 text-right font-mono text-[11px] ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`}>
+          {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
         </td>
         <td className="py-2 px-2 text-center">
           <SparkBar
@@ -147,7 +163,7 @@ const MrpRow = memo(function MrpRow({
       {isExpanded && (
         <tr>
           <td
-            colSpan={7 + allWeeks.length}
+            colSpan={COL_COUNT + allWeeks.length}
             className="p-0"
           >
             {/* Constrain detail panel to viewport width, not table width */}
@@ -163,9 +179,10 @@ const MrpRow = memo(function MrpRow({
 
 interface MrpGridProps {
   items: MrpItem[];
+  snapshotDate: string;
 }
 
-export function MrpGrid({ items }: MrpGridProps) {
+export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [abcFilter, setAbcFilter] = useState<string | null>(null);
   const [exceptionFilter, setExceptionFilter] = useState<ExceptionFlag | null>(
@@ -393,15 +410,18 @@ export function MrpGrid({ items }: MrpGridProps) {
               <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
                 Min
               </th>
+              <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
+                Excess $
+              </th>
               <th className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider">
                 Trend
               </th>
               {allWeeks.map((w) => (
                 <th
                   key={w}
-                  className="py-1.5 px-1 text-right font-medium text-cm-gray-med text-[10px] whitespace-nowrap min-w-[62px]"
+                  className="py-1.5 px-1 text-right font-medium text-cm-gray-med text-[10px] whitespace-nowrap min-w-[68px]"
                 >
-                  {fmtWeek(w)}
+                  <div>{fmtWeekWithNum(w, snapshotDate)}</div>
                 </th>
               ))}
             </tr>

@@ -95,6 +95,12 @@ export default function DashboardPage() {
       sum + i.actions.filter((a) => a.urgency === "critical").length,
     0
   );
+  const totalExcess = snapshot.items.reduce((sum, i) => {
+    if (i.maxStock <= 0) return sum;
+    const currentNet = i.weeks.length > 0 ? i.weeks[0].netPosition : i.qoh;
+    const excess = Math.max(0, currentNet - i.maxStock);
+    return sum + excess * i.stdCost;
+  }, 0);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -110,7 +116,7 @@ export default function DashboardPage() {
               Branch {snapshot.branch} &mdash;{" "}
               {BRANCH_NAMES[snapshot.branch] || "Unknown"} &middot; As of{" "}
               {fmtDateLong(snapshot.snapshotDate)}{" "}
-              &middot; <span className="text-cm-gray-med">v0.4.0</span>
+              &middot; <span className="text-cm-gray-med">v0.5.0</span>
             </p>
           </div>
         </div>
@@ -133,7 +139,16 @@ export default function DashboardPage() {
               {fmtCurrency(totalExposure)}
             </div>
             <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
-              Exposure
+              Shortage $
+            </div>
+          </div>
+          <div className="w-px h-8 bg-cm-gray-med" />
+          <div className="text-center">
+            <div className={`text-2xl font-bold font-mono ${totalExcess > 0 ? "text-blue-400" : "text-white"}`}>
+              {fmtCurrency(totalExcess)}
+            </div>
+            <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
+              Excess $
             </div>
           </div>
           <div className="w-px h-8 bg-cm-gray-med" />
@@ -201,7 +216,7 @@ export default function DashboardPage() {
       {/* Content */}
       <div className="flex-1">
         {activeTab === "grid" ? (
-          <MrpGrid items={snapshot.items} />
+          <MrpGrid items={snapshot.items} snapshotDate={snapshot.snapshotDate} />
         ) : (
           <ActionsPanel items={snapshot.items} />
         )}
