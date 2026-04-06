@@ -318,22 +318,22 @@ export function buildSnapshot(
     // Use lead time data if available, otherwise compute defaults
     const lt = leadTimes?.get(comp);
 
-    const weeklyReq = lt
+    const weeklyReq = lt != null
       ? lt.weeklyDemand
       : Math.round(
           demandRows.reduce((sum, r) => sum + Math.abs(r.demand), 0) /
             Math.max(weeks.length, 1)
         );
 
-    const leadTimeWeeks = lt?.leadTimeWeeks || 6; // default 6 weeks
-    const soq = lt?.soq || 0;
-    const safetyStock = lt?.safetyStock || 0;
-    const minStock = lt?.min || safetyStock || weeklyReq;
-    const maxStock = lt?.max || minStock + soq;
-    const primaryCustomer = lt?.primaryCustomer || "";
-    const primaryCustomerPct = lt?.primaryCustomerPct || 0;
-    const lastSupplierNum = lt?.lastSupplierNum || "";
-    const lastSupplierName = lt?.lastSupplierName || "";
+    const leadTimeWeeks = lt != null ? lt.leadTimeWeeks : 6;
+    const soq = lt?.soq ?? 0;
+    const safetyStock = lt?.safetyStock ?? 0;
+    const minStock = lt != null ? lt.min : (safetyStock > 0 ? safetyStock : weeklyReq);
+    const maxStock = lt != null ? lt.max : minStock + soq;
+    const primaryCustomer = lt?.primaryCustomer ?? "";
+    const primaryCustomerPct = lt?.primaryCustomerPct ?? 0;
+    const lastSupplierNum = lt?.lastSupplierNum ?? "";
+    const lastSupplierName = lt?.lastSupplierName ?? "";
 
     const weeksOfSupply = weeklyReq > 0 ? qoh / weeklyReq : Infinity;
     const leadTimeHorizon = addWeeks(snapshotDate, leadTimeWeeks);
