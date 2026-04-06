@@ -29,8 +29,8 @@ const C = {
   lt: 40,
   min: 62,
   max: 62,
-  curExcess: 68,
-  maxExcess: 68,
+  curExcess: 78,
+  maxExcess: 78,
   trend: 140,
   week: 72,
 } as const;
