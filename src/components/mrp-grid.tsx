@@ -7,7 +7,9 @@ import {
   memo,
   useRef,
   useEffect,
+  startTransition,
 } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { MrpItem, ExceptionFlag } from "@/lib/types";
 import { fmt, fmtWeekWithNum, fmtCurrency } from "@/lib/format";
 import { SparkBar } from "./spark-bar";
@@ -36,7 +38,6 @@ function cellColorClass(
   return { bg: "", text: "text-cm-charcoal" };
 }
 
-/** Hook to debounce a value */
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -46,136 +47,130 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
-/** Compute excess $ for an item: max(0, current_net - max) * stdCost */
 function computeExcessDollars(item: MrpItem): number {
   if (item.maxStock <= 0) return 0;
-  // Use the first week's net position (current state)
-  const currentNet = item.weeks.length > 0 ? item.weeks[0].netPosition : item.qoh;
+  const currentNet =
+    item.weeks.length > 0 ? item.weeks[0].netPosition : item.qoh;
   const excess = Math.max(0, currentNet - item.maxStock);
   return excess * item.stdCost;
 }
 
-const COL_COUNT = 9; // fixed columns before weekly data
+const COL_COUNT = 9;
+const ROW_HEIGHT = 33; // px per collapsed row
+const EXPANDED_HEIGHT = 400; // estimated px for expanded row
 
-const MrpRow = memo(function MrpRow({
-  item,
-  allWeeks,
-  ltBoundaryIndex,
-  isExpanded,
-  onToggle,
-}: {
-  item: MrpItem;
-  allWeeks: string[];
-  ltBoundaryIndex: number;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
+/** Inline row renderer — no memo wrapper needed since virtualizer handles visibility */
+function renderRow(
+  item: MrpItem,
+  allWeeks: string[],
+  ltBoundaryIndex: number,
+  isExpanded: boolean,
+  onToggle: () => void
+) {
   const hasShortage = item.exceptions.includes("SHORTAGE");
-  const weekMap = useMemo(
-    () => new Map(item.weeks.map((w) => [w.weekStart, w])),
-    [item.weeks]
-  );
-
-  const excessDollars = useMemo(() => computeExcessDollars(item), [item]);
+  const excessDollars = computeExcessDollars(item);
 
   return (
-    <>
-      <tr
+    <div>
+      <div
         onClick={onToggle}
-        className={`cursor-pointer border-b transition-colors ${
+        className={`flex cursor-pointer border-b transition-colors ${
           isExpanded
             ? "bg-gray-100 border-gray-200"
             : hasShortage
               ? "bg-cm-red/[0.03] border-gray-100 hover:bg-gray-50"
               : "border-gray-100 hover:bg-gray-50"
         }`}
+        style={{ minWidth: `${COL_COUNT * 80 + allWeeks.length * 68}px` }}
       >
-        <td className="py-2 px-2 pl-6 font-semibold font-mono text-[11px] whitespace-nowrap sticky left-0 bg-inherit z-[5]">
+        <div className="py-2 px-2 pl-6 font-semibold font-mono text-[11px] whitespace-nowrap sticky left-0 bg-inherit z-[5] min-w-[90px] shrink-0">
           <span className="mr-1.5 text-[8px] text-cm-gray-light">
             {isExpanded ? "\u25BC" : "\u25B6"}
           </span>
           {item.component}
-        </td>
-        <td className="py-2 px-2 text-cm-gray-med whitespace-nowrap overflow-hidden text-ellipsis max-w-[180px] sticky left-[90px] bg-inherit z-[5]">
+        </div>
+        <div className="py-2 px-2 text-cm-gray-med whitespace-nowrap overflow-hidden text-ellipsis min-w-[170px] max-w-[180px] shrink-0 sticky left-[90px] bg-inherit z-[5] text-xs">
           {item.description}
-        </td>
-        <td className="py-2 px-2 text-center">
+        </div>
+        <div className="py-2 px-2 text-center min-w-[40px] shrink-0">
           <span
             className={`inline-block w-5 h-[18px] leading-[18px] rounded text-[10px] font-bold text-white text-center ${ABC_COLORS[item.abcClass] || "bg-gray-400"}`}
           >
             {item.abcClass}
           </span>
-        </td>
-        <td className="py-2 px-2 text-right font-mono font-medium text-[11px]">
+        </div>
+        <div className="py-2 px-2 text-right font-mono font-medium text-[11px] min-w-[70px] shrink-0">
           {fmt(item.qoh)}
-        </td>
-        <td className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med">
+        </div>
+        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[40px] shrink-0">
           {item.leadTimeWeeks}w
-        </td>
-        <td className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med">
+        </div>
+        <div className="py-2 px-2 text-right font-mono text-[11px] text-cm-gray-med min-w-[65px] shrink-0">
           {fmt(item.minStock)}
-        </td>
-        <td className={`py-2 px-2 text-right font-mono text-[11px] ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`}>
+        </div>
+        <div
+          className={`py-2 px-2 text-right font-mono text-[11px] min-w-[65px] shrink-0 ${excessDollars > 0 ? "text-blue-700 font-semibold" : "text-gray-200"}`}
+        >
           {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
-        </td>
-        <td className="py-2 px-2 text-center">
+        </div>
+        <div className="py-2 px-2 text-center min-w-[60px] shrink-0">
           <SparkBar
             weeks={item.weeks}
             minStock={item.minStock}
             leadTimeHorizon={item.leadTimeHorizon}
           />
-        </td>
+        </div>
         {allWeeks.map((ws, idx) => {
-          const bucket = weekMap.get(ws);
           const isWithinLT = idx <= ltBoundaryIndex;
           const isLtBoundary = idx === ltBoundaryIndex;
 
-          if (!bucket) {
+          // Find bucket — linear scan is fine since weeks are pre-sorted
+          let netPosition: number | null = null;
+          for (const w of item.weeks) {
+            if (w.weekStart === ws) {
+              netPosition = w.netPosition;
+              break;
+            }
+          }
+
+          if (netPosition === null) {
             return (
-              <td
+              <div
                 key={ws}
-                className={`py-1.5 px-1.5 text-right font-mono text-[11px] border-l border-black/[0.04] ${
+                className={`py-1.5 px-1.5 text-right font-mono text-[11px] border-l border-black/[0.04] min-w-[68px] shrink-0 ${
                   isWithinLT ? "text-cm-gray-light" : "text-gray-200"
                 } ${isLtBoundary ? "border-r-2 border-r-cm-charcoal/20" : ""}`}
               >
                 &mdash;
-              </td>
+              </div>
             );
           }
           const c = cellColorClass(
-            bucket.netPosition,
+            netPosition,
             item.minStock,
             item.maxStock,
             isWithinLT
           );
           return (
-            <td
+            <div
               key={ws}
-              className={`py-1.5 px-1.5 text-right font-mono text-[11px] whitespace-nowrap border-l border-black/[0.04] ${c.bg} ${c.text} ${
-                bucket.netPosition < 0 && isWithinLT ? "font-bold" : ""
+              className={`py-1.5 px-1.5 text-right font-mono text-[11px] whitespace-nowrap border-l border-black/[0.04] min-w-[68px] shrink-0 ${c.bg} ${c.text} ${
+                netPosition < 0 && isWithinLT ? "font-bold" : ""
               } ${isLtBoundary ? "border-r-2 border-r-cm-charcoal/20" : ""}`}
             >
-              {fmt(bucket.netPosition)}
-            </td>
+              {fmt(netPosition)}
+            </div>
           );
         })}
-      </tr>
+      </div>
       {isExpanded && (
-        <tr>
-          <td
-            colSpan={COL_COUNT + allWeeks.length}
-            className="p-0"
-          >
-            {/* Constrain detail panel to viewport width, not table width */}
-            <div className="sticky left-0 w-screen max-w-[100vw]">
-              <DetailPanel item={item} />
-            </div>
-          </td>
-        </tr>
+        <div className="sticky left-0 w-screen max-w-[100vw]">
+          <DetailPanel item={item} />
+        </div>
       )}
-    </>
+    </div>
   );
-});
+}
 
 interface MrpGridProps {
   items: MrpItem[];
@@ -191,10 +186,24 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
   const [searchInput, setSearchInput] = useState("");
   const [supplierInput, setSupplierInput] = useState("");
   const [hidePkg, setHidePkg] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Debounce search inputs for performance
   const search = useDebouncedValue(searchInput, 200);
   const supplierFilter = useDebouncedValue(supplierInput, 200);
+
+  // Use startTransition for filter changes so the UI stays responsive
+  const setHidePkgTransition = useCallback((val: boolean) => {
+    startTransition(() => setHidePkg(val));
+  }, []);
+  const setAbcFilterTransition = useCallback((val: string | null) => {
+    startTransition(() => setAbcFilter(val));
+  }, []);
+  const setExceptionFilterTransition = useCallback(
+    (val: ExceptionFlag | null) => {
+      startTransition(() => setExceptionFilter(val));
+    },
+    []
+  );
 
   const baseFiltered = useMemo(() => {
     let d = items;
@@ -260,6 +269,17 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
     return map;
   }, [items, allWeeks]);
 
+  // Virtual scrolling — only render visible rows
+  const rowVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) =>
+      expanded === filtered[index]?.component
+        ? EXPANDED_HEIGHT
+        : ROW_HEIGHT,
+    overscan: 10,
+  });
+
   const handleToggle = useCallback((component: string) => {
     setExpanded((prev) => (prev === component ? null : component));
   }, []);
@@ -285,7 +305,9 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
           {(["A", "B", "C"] as const).map((abc) => (
             <button
               key={abc}
-              onClick={() => setAbcFilter(abcFilter === abc ? null : abc)}
+              onClick={() =>
+                setAbcFilterTransition(abcFilter === abc ? null : abc)
+              }
               className={`px-3 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
                 abcFilter === abc
                   ? `${ABC_COLORS[abc]} text-white`
@@ -313,7 +335,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
 
         <button
           onClick={() =>
-            setExceptionFilter(
+            setExceptionFilterTransition(
               exceptionFilter === "SHORTAGE" ? null : "SHORTAGE"
             )
           }
@@ -327,7 +349,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
         </button>
         <button
           onClick={() =>
-            setExceptionFilter(
+            setExceptionFilterTransition(
               exceptionFilter === "PLANNING_SHORTAGE"
                 ? null
                 : "PLANNING_SHORTAGE"
@@ -343,7 +365,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
         </button>
         <button
           onClick={() =>
-            setExceptionFilter(
+            setExceptionFilterTransition(
               exceptionFilter === "BELOW_MIN" ? null : "BELOW_MIN"
             )
           }
@@ -357,7 +379,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
         </button>
         <button
           onClick={() =>
-            setExceptionFilter(
+            setExceptionFilterTransition(
               exceptionFilter === "ABOVE_MAX" ? null : "ABOVE_MAX"
             )
           }
@@ -376,7 +398,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
           <input
             type="checkbox"
             checked={hidePkg}
-            onChange={(e) => setHidePkg(e.target.checked)}
+            onChange={(e) => setHidePkgTransition(e.target.checked)}
             className="accent-cm-red w-3.5 h-3.5"
           />
           Hide PKG
@@ -387,58 +409,85 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
         </div>
       </div>
 
-      {/* Scrollable grid container */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="bg-[#F9FAFB] sticky top-0 z-10">
-              <th className="py-2 px-2 pl-6 text-left font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap sticky left-0 bg-[#F9FAFB] z-20 min-w-[90px]">
-                Item
-              </th>
-              <th className="py-2 px-2 text-left font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider sticky left-[90px] bg-[#F9FAFB] z-20 min-w-[170px]">
-                Description
-              </th>
-              <th className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider w-8">
-                ABC
-              </th>
-              <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
-                QOH
-              </th>
-              <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
-                LT
-              </th>
-              <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
-                Min
-              </th>
-              <th className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap">
-                Excess $
-              </th>
-              <th className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider">
-                Trend
-              </th>
-              {allWeeks.map((w) => (
-                <th
-                  key={w}
-                  className="py-1.5 px-1 text-right font-medium text-cm-gray-med text-[10px] whitespace-nowrap min-w-[68px]"
-                >
-                  <div>{fmtWeekWithNum(w, snapshotDate)}</div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((item) => (
-              <MrpRow
+      {/* Virtualized scrollable grid */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
+        {/* Header row */}
+        <div
+          className="flex bg-[#F9FAFB] sticky top-0 z-10 border-b border-gray-200"
+          style={{
+            minWidth: `${COL_COUNT * 80 + allWeeks.length * 68}px`,
+          }}
+        >
+          <div className="py-2 px-2 pl-6 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap sticky left-0 bg-[#F9FAFB] z-20 min-w-[90px] shrink-0">
+            Item
+          </div>
+          <div className="py-2 px-2 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider sticky left-[90px] bg-[#F9FAFB] z-20 min-w-[170px] shrink-0">
+            Description
+          </div>
+          <div className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider min-w-[40px] shrink-0">
+            ABC
+          </div>
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[70px] shrink-0">
+            QOH
+          </div>
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[40px] shrink-0">
+            LT
+          </div>
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[65px] shrink-0">
+            Min
+          </div>
+          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap min-w-[65px] shrink-0">
+            Excess $
+          </div>
+          <div className="py-2 px-2 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider min-w-[60px] shrink-0">
+            Trend
+          </div>
+          {allWeeks.map((w) => (
+            <div
+              key={w}
+              className="py-1.5 px-1 text-right font-medium text-cm-gray-med text-[10px] whitespace-nowrap min-w-[68px] shrink-0"
+            >
+              {fmtWeekWithNum(w, snapshotDate)}
+            </div>
+          ))}
+        </div>
+
+        {/* Virtual rows */}
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const item = filtered[virtualRow.index];
+            if (!item) return null;
+            const isExpanded = expanded === item.component;
+            return (
+              <div
                 key={item.component}
-                item={item}
-                allWeeks={allWeeks}
-                ltBoundaryIndex={ltBoundaryMap.get(item.component) ?? -1}
-                isExpanded={expanded === item.component}
-                onToggle={() => handleToggle(item.component)}
-              />
-            ))}
-          </tbody>
-        </table>
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+                ref={rowVirtualizer.measureElement}
+                data-index={virtualRow.index}
+              >
+                {renderRow(
+                  item,
+                  allWeeks,
+                  ltBoundaryMap.get(item.component) ?? -1,
+                  isExpanded,
+                  () => handleToggle(item.component)
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         {filtered.length === 0 && (
           <div className="py-12 text-center text-cm-gray-light">
