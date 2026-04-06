@@ -138,7 +138,8 @@ function parseNewFormatRows(csvText: string): MrpDetailRow[] {
 
   (result.data as Record<string, string>[]).forEach((raw, idx) => {
     const component = raw["Component"]?.trim() || "";
-    if (!component) return;
+    // Skip blank, numeric-only, or error component codes
+    if (!component || component === "0" || component.startsWith("#")) return;
 
     const parentPart = raw["Parent Part"]?.trim() || "";
     const demand = parseNum(raw["Demand"]);
@@ -181,6 +182,39 @@ function parseNewFormatRows(csvText: string): MrpDetailRow[] {
       extendedCost: 0,
     });
   });
+
+  // Ensure every component has an inventory row (finalSort=1).
+  // Some items in the new format only have demand rows but still have QOH.
+  const componentsSeen = new Set<string>();
+  const componentsWithInventory = new Set<string>();
+  rows.forEach((r) => {
+    componentsSeen.add(r.component);
+    if (r.finalSort === 1) componentsWithInventory.add(r.component);
+  });
+
+  for (const comp of componentsSeen) {
+    if (componentsWithInventory.has(comp)) continue;
+    // Find the first row for this component to get QOH and metadata
+    const firstRow = rows.find((r) => r.component === comp);
+    if (!firstRow) continue;
+    // Insert a synthetic inventory row at the earliest date
+    rows.push({
+      vendor: firstRow.vendor,
+      component: comp,
+      description: firstRow.description,
+      parentPart: "_Inventory",
+      date: firstRow.date,
+      qoh: firstRow.qoh,
+      demand: 0,
+      openOrders: 0,
+      net: firstRow.qoh, // Starting net = QOH
+      runTotal: 0,
+      finalSort: 1,
+      index: -1, // Sort before everything else
+      stdCost: firstRow.stdCost,
+      extendedCost: 0,
+    });
+  }
 
   return rows;
 }

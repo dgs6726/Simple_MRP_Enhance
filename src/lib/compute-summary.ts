@@ -36,7 +36,8 @@ function daysBetween(a: string, b: string): number {
 function groupByComponent(rows: MrpDetailRow[]): Map<string, MrpDetailRow[]> {
   const map = new Map<string, MrpDetailRow[]>();
   for (const row of rows) {
-    if (!row.component) continue;
+    // Skip blank, numeric-only, or error component codes
+    if (!row.component || row.component === "0" || row.component.startsWith("#")) continue;
     const existing = map.get(row.component);
     if (existing) existing.push(row);
     else map.set(row.component, [row]);
@@ -353,8 +354,8 @@ export function buildSnapshot(
     const demandRows = compRows.filter((r) => r.finalSort === 2);
     const poRows = compRows.filter((r) => r.finalSort === 4);
 
-    const qoh = inventoryRow?.qoh || 0;
-    const stdCost = inventoryRow?.stdCost || compRows[0]?.stdCost || 0;
+    const qoh = inventoryRow?.qoh ?? compRows[0]?.qoh ?? 0;
+    const stdCost = inventoryRow?.stdCost ?? compRows[0]?.stdCost ?? 0;
     const description =
       inventoryRow?.description || compRows[0]?.description || "";
 
