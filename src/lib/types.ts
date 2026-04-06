@@ -37,6 +37,8 @@ export interface LeadTimeData {
   primaryCustomer: string;
   primaryCustomerPct: number;
   totalCustomerCount: number;
+  lastSupplierNum: string;
+  lastSupplierName: string;
 }
 
 /** Weekly bucket for a single item */
@@ -67,6 +69,8 @@ export interface MrpItem {
   hasOpenPo: boolean;
   primaryCustomer: string;
   primaryCustomerPct: number;
+  lastSupplierNum: string;
+  lastSupplierName: string;
   weeks: WeeklyBucket[];
   detail: MrpDetailRow[];
   exceptions: ExceptionFlag[];

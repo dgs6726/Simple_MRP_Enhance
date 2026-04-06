@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, memo } from "react";
+import { useState, useMemo, useCallback, memo, useRef, useEffect } from "react";
 import type { MrpItem, WeeklyBucket, ExceptionFlag } from "@/lib/types";
 import { fmt, fmtWeek } from "@/lib/format";
 import { SparkBar } from "./spark-bar";
@@ -19,27 +19,26 @@ function cellColorClass(
   isWithinLT: boolean
 ): { bg: string; text: string } {
   if (!isWithinLT) {
-    // Beyond lead time: muted colors
     if (val < 0) return { bg: "bg-red-100", text: "text-red-400" };
     return { bg: "", text: "text-gray-300" };
   }
   if (val < 0) return { bg: "bg-cm-red", text: "text-white" };
   if (min > 0 && val < min)
     return { bg: "bg-cm-amber-bg", text: "text-amber-800" };
-  if (max > 0 && val > max)
-    return { bg: "bg-blue-50", text: "text-blue-700" };
+  if (max > 0 && val > max) return { bg: "bg-blue-50", text: "text-blue-700" };
   return { bg: "", text: "text-cm-charcoal" };
 }
 
-/** Memoized row component to prevent re-rendering all rows on expand/collapse */
 const MrpRow = memo(function MrpRow({
   item,
   allWeeks,
+  ltBoundaryIndex,
   isExpanded,
   onToggle,
 }: {
   item: MrpItem;
   allWeeks: string[];
+  ltBoundaryIndex: number; // index of last week within LT, or -1
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -48,9 +47,6 @@ const MrpRow = memo(function MrpRow({
     () => new Map(item.weeks.map((w) => [w.weekStart, w])),
     [item.weeks]
   );
-
-  // Find the lead time boundary column index
-  const ltHorizon = item.leadTimeHorizon;
 
   return (
     <>
@@ -93,16 +89,13 @@ const MrpRow = memo(function MrpRow({
           <SparkBar
             weeks={item.weeks}
             minStock={item.minStock}
-            leadTimeHorizon={ltHorizon}
+            leadTimeHorizon={item.leadTimeHorizon}
           />
         </td>
-        {allWeeks.map((ws) => {
+        {allWeeks.map((ws, idx) => {
           const bucket = weekMap.get(ws);
-          const isWithinLT = ws <= ltHorizon;
-          const isLtBoundary =
-            ws <= ltHorizon &&
-            allWeeks[allWeeks.indexOf(ws) + 1] &&
-            allWeeks[allWeeks.indexOf(ws) + 1] > ltHorizon;
+          const isWithinLT = idx <= ltBoundaryIndex;
+          const isLtBoundary = idx === ltBoundaryIndex;
 
           if (!bucket) {
             return (
@@ -156,12 +149,13 @@ export function MrpGrid({ items }: MrpGridProps) {
     null
   );
   const [search, setSearch] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const filtered = useMemo(() => {
+  // Apply filters step by step so counts reflect the current filter state
+  const baseFiltered = useMemo(() => {
     let d = items;
     if (abcFilter) d = d.filter((i) => i.abcClass === abcFilter);
-    if (exceptionFilter)
-      d = d.filter((i) => i.exceptions.includes(exceptionFilter));
     if (search) {
       const s = search.toLowerCase();
       d = d.filter(
@@ -170,10 +164,40 @@ export function MrpGrid({ items }: MrpGridProps) {
           i.description.toLowerCase().includes(s)
       );
     }
+    if (supplierFilter) {
+      const s = supplierFilter.toLowerCase();
+      d = d.filter(
+        (i) =>
+          i.lastSupplierName.toLowerCase().includes(s) ||
+          i.lastSupplierNum.toLowerCase().includes(s)
+      );
+    }
     return d;
-  }, [items, abcFilter, exceptionFilter, search]);
+  }, [items, abcFilter, search, supplierFilter]);
 
-  // Get all unique week starts across all items
+  // Counts computed from base (before exception filter) so they're dynamic
+  const shortageCount = baseFiltered.filter((i) =>
+    i.exceptions.includes("SHORTAGE")
+  ).length;
+  const planningShortageCount = baseFiltered.filter(
+    (i) =>
+      i.exceptions.includes("PLANNING_SHORTAGE") &&
+      !i.exceptions.includes("SHORTAGE")
+  ).length;
+  const belowMinCount = baseFiltered.filter((i) =>
+    i.exceptions.includes("BELOW_MIN")
+  ).length;
+  const aboveMaxCount = baseFiltered.filter((i) =>
+    i.exceptions.includes("ABOVE_MAX")
+  ).length;
+
+  // Then apply exception filter
+  const filtered = useMemo(() => {
+    if (!exceptionFilter) return baseFiltered;
+    return baseFiltered.filter((i) => i.exceptions.includes(exceptionFilter));
+  }, [baseFiltered, exceptionFilter]);
+
+  // Get all unique week starts
   const allWeeks = useMemo(() => {
     const weekSet = new Set<string>();
     items.forEach((item) =>
@@ -182,42 +206,41 @@ export function MrpGrid({ items }: MrpGridProps) {
     return Array.from(weekSet).sort();
   }, [items]);
 
-  // Summary stats
-  const shortageCount = items.filter((i) =>
-    i.exceptions.includes("SHORTAGE")
-  ).length;
-  const planningShortageCount = items.filter(
-    (i) =>
-      i.exceptions.includes("PLANNING_SHORTAGE") &&
-      !i.exceptions.includes("SHORTAGE")
-  ).length;
-  const belowMinCount = items.filter((i) =>
-    i.exceptions.includes("BELOW_MIN")
-  ).length;
-  const aboveMaxCount = items.filter((i) =>
-    i.exceptions.includes("ABOVE_MAX")
-  ).length;
-  const actionCount = items.reduce((sum, i) => sum + i.actions.length, 0);
+  // Pre-compute LT boundary index per item (last allWeeks index within that item's LT)
+  const ltBoundaryMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of items) {
+      let lastIdx = -1;
+      for (let i = 0; i < allWeeks.length; i++) {
+        if (allWeeks[i] <= item.leadTimeHorizon) lastIdx = i;
+        else break;
+      }
+      map.set(item.component, lastIdx);
+    }
+    return map;
+  }, [items, allWeeks]);
 
-  const handleToggle = useCallback(
-    (component: string) => {
-      setExpanded((prev) => (prev === component ? null : component));
-    },
-    []
-  );
+  const handleToggle = useCallback((component: string) => {
+    setExpanded((prev) => (prev === component ? null : component));
+  }, []);
 
   return (
-    <div>
+    <div className="flex flex-col" style={{ height: "calc(100vh - 130px)" }}>
       {/* Toolbar */}
-      <div className="px-6 py-2.5 border-b border-gray-200 flex items-center gap-2 bg-[#FAFAFA] flex-wrap">
+      <div className="px-6 py-2.5 border-b border-gray-200 flex items-center gap-2 bg-[#FAFAFA] flex-wrap shrink-0">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search item or description..."
-          className="px-3 py-1.5 border border-gray-300 rounded text-sm w-52 outline-none focus:border-cm-gray-med"
+          placeholder="Search item..."
+          className="px-3 py-1.5 border border-gray-300 rounded text-sm w-40 outline-none focus:border-cm-gray-med"
+        />
+        <input
+          value={supplierFilter}
+          onChange={(e) => setSupplierFilter(e.target.value)}
+          placeholder="Filter by supplier..."
+          className="px-3 py-1.5 border border-gray-300 rounded text-sm w-44 outline-none focus:border-cm-gray-med"
         />
 
-        {/* ABC filter pills */}
         <div className="flex gap-1">
           {(["A", "B", "C"] as const).map((abc) => (
             <button
@@ -248,7 +271,6 @@ export function MrpGrid({ items }: MrpGridProps) {
 
         <div className="w-px h-5 bg-gray-300" />
 
-        {/* Exception filter pills */}
         <button
           onClick={() =>
             setExceptionFilter(
@@ -313,8 +335,8 @@ export function MrpGrid({ items }: MrpGridProps) {
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="overflow-x-auto">
+      {/* Scrollable grid container — both vertical and horizontal scroll accessible */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-[#F9FAFB] sticky top-0 z-10">
@@ -355,22 +377,23 @@ export function MrpGrid({ items }: MrpGridProps) {
                 key={item.component}
                 item={item}
                 allWeeks={allWeeks}
+                ltBoundaryIndex={ltBoundaryMap.get(item.component) ?? -1}
                 isExpanded={expanded === item.component}
                 onToggle={() => handleToggle(item.component)}
               />
             ))}
           </tbody>
         </table>
+
+        {filtered.length === 0 && (
+          <div className="py-12 text-center text-cm-gray-light">
+            No items match the current filters.
+          </div>
+        )}
       </div>
 
-      {filtered.length === 0 && (
-        <div className="py-12 text-center text-cm-gray-light">
-          No items match the current filters.
-        </div>
-      )}
-
       {/* Legend */}
-      <div className="px-6 py-3 border-t border-gray-200 flex gap-5 text-[11px] text-cm-gray-light flex-wrap">
+      <div className="px-6 py-2.5 border-t border-gray-200 flex gap-5 text-[11px] text-cm-gray-light flex-wrap shrink-0">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-cm-red inline-block" />
           Shortage (in LT)
@@ -392,8 +415,7 @@ export function MrpGrid({ items }: MrpGridProps) {
           Lead time boundary
         </span>
         <span className="ml-auto">
-          Click any row to expand details &middot; Dimmed columns = beyond lead
-          time
+          Click any row to expand &middot; Dimmed = beyond lead time
         </span>
       </div>
     </div>

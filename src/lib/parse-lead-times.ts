@@ -60,6 +60,8 @@ export function parseLeadTimesCsv(csvText: string): Map<string, LeadTimeData> {
       primaryCustomer: raw["Primary Cust"]?.trim() || "",
       primaryCustomerPct: parsePct(raw["Primary Cust %"]),
       totalCustomerCount: parseNum(raw["Total Cust Count"]),
+      lastSupplierNum: raw["Last_Supplier_Num"]?.trim() || "",
+      lastSupplierName: raw["Last_Supplier_Name"]?.trim() || "",
     });
   }
 

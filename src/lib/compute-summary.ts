@@ -373,6 +373,8 @@ export function buildSnapshot(
     const maxStock = lt?.max || minStock + soq;
     const primaryCustomer = lt?.primaryCustomer || "";
     const primaryCustomerPct = lt?.primaryCustomerPct || 0;
+    const lastSupplierNum = lt?.lastSupplierNum || "";
+    const lastSupplierName = lt?.lastSupplierName || "";
 
     const weeksOfSupply = weeklyReq > 0 ? qoh / weeklyReq : Infinity;
     const leadTimeHorizon = addWeeks(snapshotDate, leadTimeWeeks);
@@ -441,6 +443,8 @@ export function buildSnapshot(
       hasOpenPo,
       primaryCustomer,
       primaryCustomerPct,
+      lastSupplierNum,
+      lastSupplierName,
       weeks,
       detail: sortedDetail,
       exceptions,

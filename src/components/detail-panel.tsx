@@ -41,11 +41,21 @@ export function DetailPanel({ item }: DetailPanelProps) {
         />
       </div>
 
-      {/* Customer + Exception Info */}
-      <div className="flex items-center gap-3 mb-4">
+      {/* Customer + Supplier + Exception Info */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {item.lastSupplierName && (
+          <span className="text-[11px] text-cm-gray-med bg-green-50 border border-green-200 px-2 py-0.5 rounded">
+            Supplier: {item.lastSupplierName}
+            {item.lastSupplierNum && (
+              <span className="text-cm-gray-light ml-1">
+                ({item.lastSupplierNum})
+              </span>
+            )}
+          </span>
+        )}
         {item.primaryCustomer && (
           <span className="text-[11px] text-cm-gray-med bg-gray-100 px-2 py-0.5 rounded">
-            {item.primaryCustomer}
+            Customer: {item.primaryCustomer}
             {item.primaryCustomerPct > 0 && (
               <span className="text-cm-gray-light ml-1">
                 ({Math.round(item.primaryCustomerPct * 100)}%)
