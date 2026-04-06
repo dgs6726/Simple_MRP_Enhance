@@ -164,23 +164,19 @@ function computeExceptions(
   return flags;
 }
 
-/** Generate recommended actions for an item */
+/** Generate simplified recommended actions for an item */
 function computeActions(
   item: {
-    component: string;
     weeks: WeeklyBucket[];
     detail: MrpDetailRow[];
     minStock: number;
     maxStock: number;
-    soq: number;
-    leadTimeWeeks: number;
     leadTimeHorizon: string;
-    weeklyReq: number;
   },
   snapshotDate: string
 ): RecommendedAction[] {
   const actions: RecommendedAction[] = [];
-  const { weeks, detail, minStock, maxStock, soq, leadTimeHorizon, weeklyReq } = item;
+  const { weeks, detail, minStock, maxStock, leadTimeHorizon } = item;
 
   const poRows = detail.filter((d) => d.finalSort === 4);
   const withinLT = weeks.filter((w) => w.weekStart <= leadTimeHorizon);
@@ -188,121 +184,84 @@ function computeActions(
     a.weekStart.localeCompare(b.weekStart)
   );
 
-  // Find first week where net goes below min within lead time
   const firstBelowMin = withinLT.find(
     (w) => w.netPosition < minStock && minStock > 0
   );
-
-  // Find first shortage (any time horizon)
   const firstShortage = allWeeksSorted.find((w) => w.netPosition < 0);
-
-  // Find first week above max
   const firstAboveMax = allWeeksSorted.find(
     (w) => maxStock > 0 && w.netPosition > maxStock
   );
 
-  // PLACE ORDER: will go below min within LT, no PO covers it
+  // ORDER: inventory will drop below min within LT and no PO covers it
   if (firstBelowMin) {
     const days = daysBetween(snapshotDate, firstBelowMin.weekStart);
-    const gap = minStock - firstBelowMin.netPosition;
-    const orderQty = soq > 0 ? Math.ceil(gap / soq) * soq : gap;
-
-    // Check if any PO arrives before the problem
     const coveringPo = poRows.find(
       (po) => po.date <= firstBelowMin.weekStart && po.openOrders > 0
     );
-
     if (!coveringPo) {
       actions.push({
-        type: "PLACE_ORDER",
+        type: "ORDER",
         urgency: firstBelowMin.netPosition < 0 ? "critical" : "warning",
-        summary: `Place order for ${orderQty.toLocaleString()} units`,
-        detail: `Inventory drops to ${firstBelowMin.netPosition.toLocaleString()} (min: ${minStock.toLocaleString()}) by week of ${firstBelowMin.weekStart}`,
+        summary: `Place orders \u2014 drops below min by ${firstBelowMin.weekStart}`,
         daysUntilImpact: days,
-        suggestedQty: orderQty,
-        suggestedDate: firstBelowMin.weekStart,
       });
     }
-  } else if (firstShortage && !firstBelowMin) {
-    // Shortage beyond LT but no near-term issue — planning action
-    const days = daysBetween(snapshotDate, firstShortage.weekStart);
-    const gap = Math.abs(firstShortage.netPosition);
-    const orderQty = soq > 0 ? Math.ceil(gap / soq) * soq : gap;
+  } else if (firstShortage) {
     actions.push({
-      type: "PLACE_ORDER",
+      type: "ORDER",
       urgency: "info",
-      summary: `Plan order for ${orderQty.toLocaleString()} units`,
-      detail: `Shortage of ${gap.toLocaleString()} projected by week of ${firstShortage.weekStart} (outside lead time)`,
-      daysUntilImpact: days,
-      suggestedQty: orderQty,
-      suggestedDate: firstShortage.weekStart,
+      summary: `Plan future orders \u2014 shortage projected ${firstShortage.weekStart}`,
+      daysUntilImpact: daysBetween(snapshotDate, firstShortage.weekStart),
     });
   }
 
-  // PULL IN PO: shortage starts before a PO arrives
+  // MOVE IN: shortage starts before a PO arrives
   if (firstShortage) {
-    for (const po of poRows) {
-      if (po.date > firstShortage.weekStart && po.openOrders > 0) {
-        const days = daysBetween(snapshotDate, firstShortage.weekStart);
-        actions.push({
-          type: "PULL_IN_PO",
-          urgency: firstShortage.weekStart <= leadTimeHorizon ? "critical" : "warning",
-          summary: `Pull in PO ${po.parentPart} (${po.openOrders.toLocaleString()} units)`,
-          detail: `Shortage starts ${firstShortage.weekStart}, PO arrives ${po.date}. Pull in by ${daysBetween(firstShortage.weekStart, po.date)} days.`,
-          daysUntilImpact: days,
-          suggestedDate: firstShortage.weekStart,
-          relatedPo: po.parentPart,
-          relatedVendor: po.vendor,
-        });
-      }
+    const latePo = poRows.find(
+      (po) => po.date > firstShortage.weekStart && po.openOrders > 0
+    );
+    if (latePo) {
+      actions.push({
+        type: "MOVE_IN",
+        urgency:
+          firstShortage.weekStart <= leadTimeHorizon ? "critical" : "warning",
+        summary: `Move in open orders \u2014 shortage starts before PO arrives`,
+        daysUntilImpact: daysBetween(snapshotDate, firstShortage.weekStart),
+      });
     }
   }
 
-  // PUSH OUT PO: PO arrives while above max
-  if (firstAboveMax) {
-    for (const po of poRows) {
-      if (po.date <= firstAboveMax.weekStart && po.openOrders > 0) {
-        // Check if inventory is above max at PO arrival time
-        const poWeek = getWeekStart(po.date);
-        const poWeekBucket = weeks.find((w) => w.weekStart === poWeek);
-        if (poWeekBucket && poWeekBucket.netPosition > maxStock) {
-          const days = daysBetween(snapshotDate, po.date);
-          actions.push({
-            type: "PUSH_OUT_PO",
-            urgency: "info",
-            summary: `Push out PO ${po.parentPart} (${po.openOrders.toLocaleString()} units)`,
-            detail: `Inventory at ${poWeekBucket.netPosition.toLocaleString()} (max: ${maxStock.toLocaleString()}) when PO ${po.parentPart} arrives ${po.date}`,
-            daysUntilImpact: days,
-            relatedPo: po.parentPart,
-            relatedVendor: po.vendor,
-          });
-        }
-      }
+  // MOVE OUT: PO arrives while above max
+  if (firstAboveMax && maxStock > 0) {
+    const earlyPo = poRows.find((po) => {
+      const poWeek = getWeekStart(po.date);
+      const bucket = weeks.find((w) => w.weekStart === poWeek);
+      return bucket && bucket.netPosition > maxStock && po.openOrders > 0;
+    });
+    if (earlyPo) {
+      actions.push({
+        type: "MOVE_OUT",
+        urgency: "info",
+        summary: `Push out orders \u2014 inventory above max at arrival`,
+        daysUntilImpact: daysBetween(snapshotDate, earlyPo.date),
+      });
     }
   }
 
-  // REDUCE PO: open PO qty will push well above max
-  for (const po of poRows) {
-    const poWeek = getWeekStart(po.date);
-    const poWeekBucket = weeks.find((w) => w.weekStart === poWeek);
-    if (poWeekBucket && maxStock > 0) {
-      const overage = poWeekBucket.netPosition - maxStock;
-      if (overage > po.openOrders * 0.5) {
-        actions.push({
-          type: "REDUCE_PO",
-          urgency: "info",
-          summary: `Reduce PO ${po.parentPart} by ~${overage.toLocaleString()} units`,
-          detail: `PO of ${po.openOrders.toLocaleString()} pushes inventory to ${poWeekBucket.netPosition.toLocaleString()} (max: ${maxStock.toLocaleString()})`,
-          daysUntilImpact: daysBetween(snapshotDate, po.date),
-          suggestedQty: Math.max(0, po.openOrders - overage),
-          relatedPo: po.parentPart,
-          relatedVendor: po.vendor,
-        });
-      }
-    }
+  // REDUCE: consistently above max
+  if (
+    maxStock > 0 &&
+    withinLT.length > 0 &&
+    withinLT.every((w) => w.netPosition > maxStock)
+  ) {
+    actions.push({
+      type: "REDUCE",
+      urgency: "info",
+      summary: `Reduce orders \u2014 inventory stays above max through lead time`,
+      daysUntilImpact: 0,
+    });
   }
 
-  // Sort by urgency then days until impact
   const urgencyOrder = { critical: 0, warning: 1, info: 2 };
   actions.sort(
     (a, b) =>
@@ -411,15 +370,11 @@ export function buildSnapshot(
 
     const actions = computeActions(
       {
-        component: comp,
         weeks,
         detail: sortedDetail,
         minStock,
         maxStock,
-        soq,
-        leadTimeWeeks,
         leadTimeHorizon,
-        weeklyReq,
       },
       snapshotDate
     );

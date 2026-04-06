@@ -7,6 +7,20 @@ interface DetailPanelProps {
   item: MrpItem;
 }
 
+const ACTION_COLORS = {
+  ORDER: "bg-cm-red text-white",
+  MOVE_IN: "bg-orange-500 text-white",
+  MOVE_OUT: "bg-blue-500 text-white",
+  REDUCE: "bg-indigo-500 text-white",
+};
+
+const ACTION_LABELS = {
+  ORDER: "Place Orders",
+  MOVE_IN: "Move In",
+  MOVE_OUT: "Move Out",
+  REDUCE: "Reduce",
+};
+
 export function DetailPanel({ item }: DetailPanelProps) {
   const demands = item.detail.filter((d) => d.finalSort === 2);
   const orders = item.detail.filter((d) => d.finalSort === 4);
@@ -19,9 +33,9 @@ export function DetailPanel({ item }: DetailPanelProps) {
         : "text-green-700";
 
   return (
-    <div className="px-4 py-3 bg-[#FAFAFA] border-t border-gray-200">
-      {/* Stat Cards */}
-      <div className="grid grid-cols-6 gap-2.5 mb-4">
+    <div className="px-6 py-4 bg-[#FAFAFA] border-t border-gray-200 max-w-[1200px]">
+      {/* Stat Cards — compact 2-row grid */}
+      <div className="grid grid-cols-6 gap-2 mb-3">
         <StatCard label="On Hand" value={fmt(item.qoh)} />
         <StatCard label="Weekly Req" value={fmt(item.weeklyReq)} />
         <StatCard
@@ -33,16 +47,19 @@ export function DetailPanel({ item }: DetailPanelProps) {
           }
           valueClass={wosColor}
         />
-        <StatCard label="Min / Max" value={`${fmt(item.minStock)} / ${fmt(item.maxStock)}`} />
-        <StatCard label="Lead Time" value={`${item.leadTimeWeeks} weeks`} />
+        <StatCard
+          label="Min / Max"
+          value={`${fmt(item.minStock)} / ${fmt(item.maxStock)}`}
+        />
+        <StatCard label="Lead Time" value={`${item.leadTimeWeeks}w`} />
         <StatCard
           label="SOQ"
           value={item.stdOrdQty > 0 ? fmt(item.stdOrdQty) : "\u2014"}
         />
       </div>
 
-      {/* Customer + Supplier + Exception Info */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      {/* Tags row: supplier, customer, exceptions */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         {item.lastSupplierName && (
           <span className="text-[11px] text-cm-gray-med bg-green-50 border border-green-200 px-2 py-0.5 rounded">
             Supplier: {item.lastSupplierName}
@@ -85,51 +102,43 @@ export function DetailPanel({ item }: DetailPanelProps) {
         ))}
       </div>
 
-      {/* Actions */}
+      {/* Simplified actions */}
       {item.actions.length > 0 && (
-        <div className="mb-4">
-          <h4 className="text-[11px] font-semibold text-cm-charcoal uppercase tracking-wider mb-1.5">
-            Recommended Actions
-          </h4>
-          <div className="space-y-1.5">
-            {item.actions.map((action, i) => (
-              <div
-                key={i}
-                className={`flex items-start gap-2 text-xs px-3 py-2 rounded-md border ${
-                  action.urgency === "critical"
-                    ? "bg-red-50 border-red-200"
-                    : action.urgency === "warning"
-                      ? "bg-amber-50 border-amber-200"
-                      : "bg-blue-50 border-blue-200"
-                }`}
+        <div className="flex gap-2 mb-3 flex-wrap">
+          {item.actions.map((action, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md ${
+                action.urgency === "critical"
+                  ? "bg-red-50 border border-red-200"
+                  : action.urgency === "warning"
+                    ? "bg-amber-50 border border-amber-200"
+                    : "bg-blue-50 border border-blue-200"
+              }`}
+            >
+              <span
+                className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${ACTION_COLORS[action.type]}`}
               >
+                {ACTION_LABELS[action.type]}
+              </span>
+              <span className="text-cm-gray-med">{action.summary}</span>
+              {action.daysUntilImpact > 0 && (
                 <span
-                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${
-                    action.urgency === "critical"
-                      ? "bg-cm-red text-white"
-                      : action.urgency === "warning"
-                        ? "bg-cm-amber text-white"
-                        : "bg-blue-500 text-white"
+                  className={`font-mono font-bold ${
+                    action.daysUntilImpact < 14
+                      ? "text-cm-red"
+                      : "text-cm-gray-light"
                   }`}
                 >
-                  {action.type.replace(/_/g, " ")}
+                  {action.daysUntilImpact}d
                 </span>
-                <div className="min-w-0">
-                  <div className="font-semibold">{action.summary}</div>
-                  <div className="text-cm-gray-med mt-0.5">{action.detail}</div>
-                  {action.daysUntilImpact > 0 && (
-                    <div className="text-cm-gray-light mt-0.5">
-                      {action.daysUntilImpact} days until impact
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* POs and Demand Sources side by side */}
+      {/* POs and Demand — side by side, constrained width */}
       <div className="grid grid-cols-2 gap-4">
         {orders.length > 0 && (
           <div>
@@ -231,11 +240,11 @@ function StatCard({
   valueClass?: string;
 }) {
   return (
-    <div className="bg-white rounded-md border border-gray-200 px-3 py-2">
-      <div className="text-[10px] text-cm-gray-light uppercase tracking-wider mb-1">
+    <div className="bg-white rounded-md border border-gray-200 px-3 py-1.5">
+      <div className="text-[9px] text-cm-gray-light uppercase tracking-wider mb-0.5">
         {label}
       </div>
-      <div className={`text-lg font-bold font-mono ${valueClass}`}>
+      <div className={`text-base font-bold font-mono ${valueClass}`}>
         {value}
       </div>
     </div>

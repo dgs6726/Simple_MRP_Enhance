@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, useMemo, useCallback, memo, useRef, useEffect } from "react";
-import type { MrpItem, WeeklyBucket, ExceptionFlag } from "@/lib/types";
+import {
+  useState,
+  useMemo,
+  useCallback,
+  memo,
+  useRef,
+  useEffect,
+} from "react";
+import type { MrpItem, ExceptionFlag } from "@/lib/types";
 import { fmt, fmtWeek } from "@/lib/format";
 import { SparkBar } from "./spark-bar";
 import { DetailPanel } from "./detail-panel";
@@ -29,6 +36,16 @@ function cellColorClass(
   return { bg: "", text: "text-cm-charcoal" };
 }
 
+/** Hook to debounce a value */
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 const MrpRow = memo(function MrpRow({
   item,
   allWeeks,
@@ -38,7 +55,7 @@ const MrpRow = memo(function MrpRow({
 }: {
   item: MrpItem;
   allWeeks: string[];
-  ltBoundaryIndex: number; // index of last week within LT, or -1
+  ltBoundaryIndex: number;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -129,8 +146,14 @@ const MrpRow = memo(function MrpRow({
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={7 + allWeeks.length} className="p-0">
-            <DetailPanel item={item} />
+          <td
+            colSpan={7 + allWeeks.length}
+            className="p-0"
+          >
+            {/* Constrain detail panel to viewport width, not table width */}
+            <div className="sticky left-0 w-screen max-w-[100vw]">
+              <DetailPanel item={item} />
+            </div>
           </td>
         </tr>
       )}
@@ -148,13 +171,17 @@ export function MrpGrid({ items }: MrpGridProps) {
   const [exceptionFilter, setExceptionFilter] = useState<ExceptionFlag | null>(
     null
   );
-  const [search, setSearch] = useState("");
-  const [supplierFilter, setSupplierFilter] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [supplierInput, setSupplierInput] = useState("");
+  const [hidePkg, setHidePkg] = useState(true);
 
-  // Apply filters step by step so counts reflect the current filter state
+  // Debounce search inputs for performance
+  const search = useDebouncedValue(searchInput, 200);
+  const supplierFilter = useDebouncedValue(supplierInput, 200);
+
   const baseFiltered = useMemo(() => {
     let d = items;
+    if (hidePkg) d = d.filter((i) => !i.component.startsWith("PKG"));
     if (abcFilter) d = d.filter((i) => i.abcClass === abcFilter);
     if (search) {
       const s = search.toLowerCase();
@@ -173,9 +200,8 @@ export function MrpGrid({ items }: MrpGridProps) {
       );
     }
     return d;
-  }, [items, abcFilter, search, supplierFilter]);
+  }, [items, abcFilter, search, supplierFilter, hidePkg]);
 
-  // Counts computed from base (before exception filter) so they're dynamic
   const shortageCount = baseFiltered.filter((i) =>
     i.exceptions.includes("SHORTAGE")
   ).length;
@@ -191,13 +217,11 @@ export function MrpGrid({ items }: MrpGridProps) {
     i.exceptions.includes("ABOVE_MAX")
   ).length;
 
-  // Then apply exception filter
   const filtered = useMemo(() => {
     if (!exceptionFilter) return baseFiltered;
     return baseFiltered.filter((i) => i.exceptions.includes(exceptionFilter));
   }, [baseFiltered, exceptionFilter]);
 
-  // Get all unique week starts
   const allWeeks = useMemo(() => {
     const weekSet = new Set<string>();
     items.forEach((item) =>
@@ -206,7 +230,6 @@ export function MrpGrid({ items }: MrpGridProps) {
     return Array.from(weekSet).sort();
   }, [items]);
 
-  // Pre-compute LT boundary index per item (last allWeeks index within that item's LT)
   const ltBoundaryMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of items) {
@@ -229,14 +252,14 @@ export function MrpGrid({ items }: MrpGridProps) {
       {/* Toolbar */}
       <div className="px-6 py-2.5 border-b border-gray-200 flex items-center gap-2 bg-[#FAFAFA] flex-wrap shrink-0">
         <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           placeholder="Search item..."
           className="px-3 py-1.5 border border-gray-300 rounded text-sm w-40 outline-none focus:border-cm-gray-med"
         />
         <input
-          value={supplierFilter}
-          onChange={(e) => setSupplierFilter(e.target.value)}
+          value={supplierInput}
+          onChange={(e) => setSupplierInput(e.target.value)}
           placeholder="Filter by supplier..."
           className="px-3 py-1.5 border border-gray-300 rounded text-sm w-44 outline-none focus:border-cm-gray-med"
         />
@@ -330,13 +353,25 @@ export function MrpGrid({ items }: MrpGridProps) {
           Over Max ({aboveMaxCount})
         </button>
 
+        <div className="w-px h-5 bg-gray-300" />
+
+        <label className="flex items-center gap-1.5 text-[11px] text-cm-gray-med cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={hidePkg}
+            onChange={(e) => setHidePkg(e.target.checked)}
+            className="accent-cm-red w-3.5 h-3.5"
+          />
+          Hide PKG
+        </label>
+
         <div className="ml-auto text-xs text-cm-gray-light">
           {filtered.length} of {items.length} items
         </div>
       </div>
 
-      {/* Scrollable grid container — both vertical and horizontal scroll accessible */}
-      <div ref={scrollRef} className="flex-1 overflow-auto">
+      {/* Scrollable grid container */}
+      <div className="flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-[#F9FAFB] sticky top-0 z-10">

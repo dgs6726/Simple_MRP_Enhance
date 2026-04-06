@@ -86,23 +86,16 @@ export type ExceptionFlag =
   | "EXCESS";            // net > max for 4+ consecutive weeks
 
 export type ActionType =
-  | "PLACE_ORDER"
-  | "PULL_IN_PO"
-  | "PUSH_OUT_PO"
-  | "INCREASE_PO"
-  | "REDUCE_PO"
-  | "CANCEL_PO";
+  | "ORDER"
+  | "MOVE_IN"
+  | "MOVE_OUT"
+  | "REDUCE";
 
 export interface RecommendedAction {
   type: ActionType;
   urgency: "critical" | "warning" | "info";
   summary: string;
-  detail: string;
   daysUntilImpact: number;
-  suggestedQty?: number;
-  suggestedDate?: string;
-  relatedPo?: string;
-  relatedVendor?: string;
 }
 
 /** A parsed + computed snapshot of MRP data */
