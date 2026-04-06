@@ -30,7 +30,7 @@ const C = {
   min: 62,
   max: 62,
   excess: 68,
-  trend: 58,
+  trend: 90,
   week: 72,
 } as const;
 
@@ -172,13 +172,31 @@ interface MrpGridProps {
   snapshotDate: string;
 }
 
+type SortKey = "component" | "description" | "abcClass" | "qoh" | "leadTimeWeeks" | "minStock" | "maxStock" | "excess" | null;
+type SortDir = "asc" | "desc";
+
 export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [abcFilter, setAbcFilter] = useState<string | null>(null);
   const [exceptionFilter, setExceptionFilter] = useState<ExceptionFlag | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [supplierInput, setSupplierInput] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleSort = useCallback((key: SortKey) => {
+    startTransition(() => {
+      setSortKey((prev) => {
+        if (prev === key) {
+          setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+          return key;
+        }
+        setSortDir(key === "component" || key === "description" ? "asc" : "desc");
+        return key;
+      });
+    });
+  }, []);
 
   const search = useDebouncedValue(searchInput, 200);
   const supplierFilter = useDebouncedValue(supplierInput, 200);
@@ -209,10 +227,28 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
   const belowMinCount = baseFiltered.filter((i) => i.exceptions.includes("BELOW_MIN")).length;
   const aboveMaxCount = baseFiltered.filter((i) => i.exceptions.includes("ABOVE_MAX")).length;
 
-  const filtered = useMemo(() => {
+  const exceptionFiltered = useMemo(() => {
     if (!exceptionFilter) return baseFiltered;
     return baseFiltered.filter((i) => i.exceptions.includes(exceptionFilter));
   }, [baseFiltered, exceptionFilter]);
+
+  const filtered = useMemo(() => {
+    if (!sortKey) return exceptionFiltered;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...exceptionFiltered].sort((a, b) => {
+      let av: number | string;
+      let bv: number | string;
+      if (sortKey === "excess") {
+        av = computeExcessDollars(a);
+        bv = computeExcessDollars(b);
+      } else {
+        av = a[sortKey];
+        bv = b[sortKey];
+      }
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+      return ((av as number) - (bv as number)) * dir;
+    });
+  }, [exceptionFiltered, sortKey, sortDir]);
 
   const allWeeks = useMemo(() => {
     const weekSet = new Set<string>();
@@ -290,15 +326,30 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
       <div ref={scrollRef} className="flex-1 overflow-auto">
         {/* Header */}
         <div className="flex items-center bg-[#F9FAFB] sticky top-0 z-10 border-b border-gray-200" style={{ minWidth: totalWidth }}>
-          <div className="py-2 px-2 pl-5 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider whitespace-nowrap sticky left-0 bg-[#F9FAFB] z-20 shrink-0 border-r border-gray-100" style={{ width: C.item }}>Item</div>
-          <div className="py-2 px-2 font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider sticky bg-[#F9FAFB] z-20 shrink-0 border-r border-gray-200" style={{ width: C.desc, left: C.item }}>Description</div>
-          <div className="py-2 px-1 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.abc }}>ABC</div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.qoh }}>QOH</div>
-          <div className="py-2 px-1 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.lt }}>LT</div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.min }}>Min</div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.max }}>Max</div>
-          <div className="py-2 px-2 text-right font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.excess }}>Excess $</div>
-          <div className="py-2 px-1 text-center font-semibold text-cm-gray-light text-[10px] uppercase tracking-wider shrink-0" style={{ width: C.trend }}>Trend</div>
+          {[
+            { key: "component" as SortKey, label: "Item", w: C.item, align: "text-left pl-5", sticky: "sticky left-0 bg-[#F9FAFB] z-20 border-r border-gray-100" },
+            { key: "description" as SortKey, label: "Desc", w: C.desc, align: "text-left", sticky: `sticky bg-[#F9FAFB] z-20 border-r border-gray-200`, stickyLeft: C.item },
+            { key: "abcClass" as SortKey, label: "ABC", w: C.abc, align: "text-center" },
+            { key: "qoh" as SortKey, label: "QOH", w: C.qoh, align: "text-right" },
+            { key: "leadTimeWeeks" as SortKey, label: "LT", w: C.lt, align: "text-right" },
+            { key: "minStock" as SortKey, label: "Min", w: C.min, align: "text-right" },
+            { key: "maxStock" as SortKey, label: "Max", w: C.max, align: "text-right" },
+            { key: "excess" as SortKey, label: "Excess $", w: C.excess, align: "text-right" },
+            { key: null as SortKey, label: "Trend", w: C.trend, align: "text-center" },
+          ].map((col, i) => {
+            const isSorted = sortKey === col.key && col.key !== null;
+            const arrow = isSorted ? (sortDir === "asc" ? " \u25B2" : " \u25BC") : "";
+            return (
+              <div
+                key={i}
+                onClick={col.key ? () => handleSort(col.key) : undefined}
+                className={`py-2 px-2 font-semibold text-[10px] uppercase tracking-wider shrink-0 whitespace-nowrap ${col.align} ${col.sticky || ""} ${col.key ? "cursor-pointer hover:text-cm-charcoal select-none" : ""} ${isSorted ? "text-cm-charcoal" : "text-cm-gray-light"}`}
+                style={{ width: col.w, ...(col.stickyLeft != null ? { left: col.stickyLeft } : {}) }}
+              >
+                {col.label}{arrow}
+              </div>
+            );
+          })}
           {allWeeks.map((w) => (
             <div key={w} className="py-1.5 px-1 text-right font-medium text-cm-gray-med text-[10px] whitespace-nowrap shrink-0" style={{ width: C.week }}>
               {fmtWeekWithNum(w, snapshotDate)}
