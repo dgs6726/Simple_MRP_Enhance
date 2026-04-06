@@ -7,8 +7,11 @@ import {
   LayoutGrid,
   ListChecks,
   Settings,
+  RefreshCw,
 } from "lucide-react";
-import { getActiveSnapshot } from "@/lib/store";
+import { getActiveSnapshot, saveSnapshot, getRawRows } from "@/lib/store";
+import { getItemConfigs, configsToLeadTimeMap } from "@/lib/item-config";
+import { buildSnapshot } from "@/lib/compute-summary";
 import { fmtCurrency, fmtDateLong } from "@/lib/format";
 import { MrpGrid } from "@/components/mrp-grid";
 import { ActionsPanel } from "@/components/actions-panel";
@@ -121,7 +124,7 @@ export default function DashboardPage() {
               Branch {snapshot.branch} &mdash;{" "}
               {BRANCH_NAMES[snapshot.branch] || "Unknown"} &middot; As of{" "}
               {fmtDateLong(snapshot.snapshotDate)}{" "}
-              &middot; <span className="text-cm-gray-med">v0.8.2</span>
+              &middot; <span className="text-cm-gray-med">v0.9.0</span>
             </p>
           </div>
         </div>
@@ -153,7 +156,7 @@ export default function DashboardPage() {
               {fmtCurrency(totalExcess)}
             </div>
             <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
-              Excess $
+              Cur. Excess
             </div>
           </div>
           <div className="w-px h-8 bg-cm-gray-med" />
@@ -186,6 +189,22 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="w-px h-8 bg-cm-gray-med" />
+          <button
+            onClick={() => {
+              const rawRows = getRawRows();
+              if (!rawRows) return;
+              const configs = getItemConfigs(snapshot.branch);
+              const leadTimes = configs.size > 0 ? configsToLeadTimeMap(configs) : undefined;
+              const newSnap = buildSnapshot(rawRows, snapshot.branch, leadTimes);
+              saveSnapshot(newSnap);
+              setSnapshot(newSnap);
+            }}
+            className="px-3 py-1.5 bg-cm-green/80 hover:bg-cm-green text-white text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1.5"
+            title="Reprocess MRP data with current item config"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Reprocess
+          </button>
           <button
             onClick={() => router.push("/upload")}
             className="px-3 py-1.5 bg-cm-gray-med/60 hover:bg-cm-gray-med text-white text-xs font-medium rounded transition-colors cursor-pointer flex items-center gap-1.5"

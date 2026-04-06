@@ -44,7 +44,7 @@ function groupByComponent(rows: MrpDetailRow[]): Map<string, MrpDetailRow[]> {
   return map;
 }
 
-/** Compute weekly buckets for an item's detail rows, filling gaps with carry-forward */
+/** Compute weekly buckets for an item's detail rows */
 function computeWeeklyBuckets(rows: MrpDetailRow[]): WeeklyBucket[] {
   const weekMap = new Map<
     string,
@@ -70,49 +70,51 @@ function computeWeeklyBuckets(rows: MrpDetailRow[]): WeeklyBucket[] {
     weekMap.set(ws, existing);
   }
 
-  // Sort the weeks that have data
-  const sortedWeeks = Array.from(weekMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  if (sortedWeeks.length < 2) {
-    return sortedWeeks.map(([weekStart, data]) => ({
+  return Array.from(weekMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, data]) => ({
       weekStart,
       netPosition: data.netPosition,
       totalDemand: data.totalDemand,
       totalSupply: data.totalSupply,
     }));
+}
+
+/**
+ * Fill an item's weekly buckets to cover a full global week range.
+ * - Weeks before first transaction: carry forward QOH (or first net)
+ * - Gaps between transactions: carry forward previous net
+ * - Weeks after last transaction: carry forward last net
+ */
+function fillWeeksToGlobalRange(
+  itemWeeks: WeeklyBucket[],
+  globalWeeks: string[],
+  qoh: number
+): WeeklyBucket[] {
+  if (globalWeeks.length === 0) return itemWeeks;
+
+  const weekMap = new Map<string, WeeklyBucket>();
+  for (const w of itemWeeks) {
+    weekMap.set(w.weekStart, w);
   }
 
-  // Fill gaps: generate every week from first to last, carry forward net position
-  const firstWeek = sortedWeeks[0][0];
-  const lastWeek = sortedWeeks[sortedWeeks.length - 1][0];
+  const initialNet = itemWeeks.length > 0 ? itemWeeks[0].netPosition : qoh;
   const result: WeeklyBucket[] = [];
-  let currentWeek = firstWeek;
-  let lastNet = sortedWeeks[0][1].netPosition;
+  let lastNet = qoh; // Start with QOH before any transactions
 
-  while (currentWeek <= lastWeek) {
-    const data = weekMap.get(currentWeek);
-    if (data) {
-      lastNet = data.netPosition;
-      result.push({
-        weekStart: currentWeek,
-        netPosition: data.netPosition,
-        totalDemand: data.totalDemand,
-        totalSupply: data.totalSupply,
-      });
+  for (const ws of globalWeeks) {
+    const existing = weekMap.get(ws);
+    if (existing) {
+      lastNet = existing.netPosition;
+      result.push(existing);
     } else {
-      // No activity this week — carry forward last net position
       result.push({
-        weekStart: currentWeek,
+        weekStart: ws,
         netPosition: lastNet,
         totalDemand: 0,
         totalSupply: 0,
       });
     }
-    // Advance to next Monday
-    const d = new Date(currentWeek + "T00:00:00");
-    d.setDate(d.getDate() + 7);
-    currentWeek = d.toISOString().split("T")[0];
   }
 
   return result;
@@ -160,8 +162,13 @@ function computeExceptions(
     flags.push("SHORTAGE");
   }
 
-  // Planning shortage: negative outside lead time (you have time to act)
-  if (beyondLT.some((w) => w.netPosition < 0)) {
+  // Planning shortage: negative beyond lead time but within 30 days of LT fence
+  // (actionable planning horizon — don't flag shortages way out in the future)
+  const planningWindow = addWeeks(leadTimeHorizon, 4); // ~30 days past LT
+  const nearBeyondLT = weeks.filter(
+    (w) => w.weekStart > leadTimeHorizon && w.weekStart <= planningWindow
+  );
+  if (nearBeyondLT.some((w) => w.netPosition < 0)) {
     flags.push("PLANNING_SHORTAGE");
   }
 
@@ -443,6 +450,20 @@ export function buildSnapshot(
       exceptions,
       actions,
     });
+  }
+
+  // Build global week range from all items
+  const globalWeekSet = new Set<string>();
+  for (const item of items) {
+    for (const w of item.weeks) {
+      globalWeekSet.add(w.weekStart);
+    }
+  }
+  const globalWeeks = Array.from(globalWeekSet).sort();
+
+  // Fill each item's weeks to cover the full global range
+  for (const item of items) {
+    item.weeks = fillWeeksToGlobalRange(item.weeks, globalWeeks, item.qoh);
   }
 
   // Sort: actionable shortages first, then planning shortages, then by worst position

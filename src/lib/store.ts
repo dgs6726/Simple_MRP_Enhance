@@ -3,11 +3,12 @@
  * Uses localStorage so data persists across page navigations.
  * Will be replaced by Supabase in the full version.
  */
-import type { MrpSnapshot, LeadTimeData } from "./types";
+import type { MrpSnapshot, LeadTimeData, MrpDetailRow } from "./types";
 
 const STORAGE_KEY = "mrp_snapshots";
 const ACTIVE_KEY = "mrp_active_snapshot";
 const LEAD_TIMES_KEY = "mrp_lead_times";
+const RAW_ROWS_KEY = "mrp_raw_rows";
 
 export function getSnapshots(): MrpSnapshot[] {
   if (typeof window === "undefined") return [];
@@ -82,4 +83,25 @@ export function getLeadTimes(): Map<string, LeadTimeData> | undefined {
 export function hasLeadTimes(): boolean {
   if (typeof window === "undefined") return false;
   return localStorage.getItem(LEAD_TIMES_KEY) !== null;
+}
+
+/** Store raw parsed MRP rows so we can re-process without re-uploading */
+export function saveRawRows(rows: MrpDetailRow[]): void {
+  localStorage.setItem(RAW_ROWS_KEY, JSON.stringify(rows));
+}
+
+export function getRawRows(): MrpDetailRow[] | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(RAW_ROWS_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function hasRawRows(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(RAW_ROWS_KEY) !== null;
 }

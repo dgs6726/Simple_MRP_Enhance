@@ -132,7 +132,7 @@ function renderRow(
           {excessDollars > 0 ? fmtCurrency(excessDollars) : "\u2014"}
         </div>
         <div className="py-2 px-1 text-center shrink-0" style={{ width: C.trend }}>
-          <SparkBar weeks={item.weeks} minStock={item.minStock} leadTimeHorizon={item.leadTimeHorizon} />
+          <SparkBar weeks={item.weeks} minStock={item.minStock} maxStock={item.maxStock} leadTimeHorizon={item.leadTimeHorizon} />
         </div>
         {allWeeks.map((ws, idx) => {
           const isWithinLT = idx <= ltBoundaryIndex;
@@ -334,7 +334,7 @@ export function MrpGrid({ items, snapshotDate }: MrpGridProps) {
             { key: "leadTimeWeeks" as SortKey, label: "LT", w: C.lt, align: "text-right" },
             { key: "minStock" as SortKey, label: "Min", w: C.min, align: "text-right" },
             { key: "maxStock" as SortKey, label: "Max", w: C.max, align: "text-right" },
-            { key: "excess" as SortKey, label: "Excess $", w: C.excess, align: "text-right" },
+            { key: "excess" as SortKey, label: "Cur. Excess", w: C.excess, align: "text-right" },
             { key: null as SortKey, label: "Trend", w: C.trend, align: "text-center" },
           ].map((col, i) => {
             const isSorted = sortKey === col.key && col.key !== null;

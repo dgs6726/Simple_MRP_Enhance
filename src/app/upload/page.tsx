@@ -20,6 +20,7 @@ import {
   setActiveSnapshotId,
   getActiveSnapshotId,
   deleteSnapshot,
+  saveRawRows,
 } from "@/lib/store";
 import {
   hasItemConfigs,
@@ -137,6 +138,9 @@ export default function UploadPage() {
         const configs = getItemConfigs(2);
         const leadTimes =
           configs.size > 0 ? configsToLeadTimeMap(configs) : undefined;
+
+        // Save raw rows for re-processing when config changes
+        saveRawRows(rows);
 
         const snapshot = buildSnapshot(rows, 2, leadTimes);
         saveSnapshot(snapshot);
