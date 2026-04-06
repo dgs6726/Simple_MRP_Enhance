@@ -1,12 +1,13 @@
 /**
- * Simple client-side store for MRP snapshots.
+ * Simple client-side store for MRP snapshots and lead time data.
  * Uses localStorage so data persists across page navigations.
  * Will be replaced by Supabase in the full version.
  */
-import type { MrpSnapshot } from "./types";
+import type { MrpSnapshot, LeadTimeData } from "./types";
 
 const STORAGE_KEY = "mrp_snapshots";
 const ACTIVE_KEY = "mrp_active_snapshot";
+const LEAD_TIMES_KEY = "mrp_lead_times";
 
 export function getSnapshots(): MrpSnapshot[] {
   if (typeof window === "undefined") return [];
@@ -20,7 +21,8 @@ export function getSnapshots(): MrpSnapshot[] {
 }
 
 export function saveSnapshot(snapshot: MrpSnapshot): void {
-  const existing = getSnapshots();
+  // Only keep last 5 snapshots to avoid localStorage limits
+  const existing = getSnapshots().slice(0, 4);
   existing.unshift(snapshot);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
   setActiveSnapshotId(snapshot.id);
@@ -49,10 +51,35 @@ export function deleteSnapshot(id: string): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots));
   if (getActiveSnapshotId() === id) {
     const next = snapshots[0];
-    if (next) {
-      setActiveSnapshotId(next.id);
-    } else {
-      localStorage.removeItem(ACTIVE_KEY);
-    }
+    if (next) setActiveSnapshotId(next.id);
+    else localStorage.removeItem(ACTIVE_KEY);
   }
+}
+
+/** Store lead time data as a serializable array */
+export function saveLeadTimes(data: Map<string, LeadTimeData>): void {
+  const arr = Array.from(data.values());
+  localStorage.setItem(LEAD_TIMES_KEY, JSON.stringify(arr));
+}
+
+/** Retrieve lead time data as a Map */
+export function getLeadTimes(): Map<string, LeadTimeData> | undefined {
+  if (typeof window === "undefined") return undefined;
+  const raw = localStorage.getItem(LEAD_TIMES_KEY);
+  if (!raw) return undefined;
+  try {
+    const arr: LeadTimeData[] = JSON.parse(raw);
+    const map = new Map<string, LeadTimeData>();
+    for (const item of arr) {
+      map.set(item.component, item);
+    }
+    return map;
+  } catch {
+    return undefined;
+  }
+}
+
+export function hasLeadTimes(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(LEAD_TIMES_KEY) !== null;
 }

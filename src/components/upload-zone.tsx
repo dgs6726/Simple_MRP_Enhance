@@ -1,17 +1,25 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Upload, FileSpreadsheet, AlertCircle, Check } from "lucide-react";
+import { useCallback, useState, useId } from "react";
+import { Upload, AlertCircle } from "lucide-react";
 
 interface UploadZoneProps {
   onFileAccepted: (text: string, fileName: string) => void;
   isProcessing: boolean;
+  compact?: boolean;
+  label?: string;
 }
 
-export function UploadZone({ onFileAccepted, isProcessing }: UploadZoneProps) {
+export function UploadZone({
+  onFileAccepted,
+  isProcessing,
+  compact = false,
+  label = "Drop your CSV file here",
+}: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const inputId = useId();
 
   const handleFile = useCallback(
     (file: File) => {
@@ -64,8 +72,9 @@ export function UploadZone({ onFileAccepted, isProcessing }: UploadZoneProps) {
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
         className={`
-          relative border-2 border-dashed rounded-lg p-12 text-center cursor-pointer
+          relative border-2 border-dashed rounded-lg text-center cursor-pointer
           transition-all duration-200
+          ${compact ? "px-6 py-5" : "p-12"}
           ${
             isDragOver
               ? "border-cm-red bg-cm-red/5"
@@ -73,34 +82,42 @@ export function UploadZone({ onFileAccepted, isProcessing }: UploadZoneProps) {
           }
           ${isProcessing ? "pointer-events-none opacity-60" : ""}
         `}
-        onClick={() => document.getElementById("csv-input")?.click()}
+        onClick={() => document.getElementById(inputId)?.click()}
       >
         <input
-          id="csv-input"
+          id={inputId}
           type="file"
           accept=".csv"
           onChange={handleInputChange}
           className="hidden"
         />
 
-        <div className="flex flex-col items-center gap-3">
+        <div className={`flex items-center gap-3 ${compact ? "" : "flex-col"}`}>
           {isProcessing ? (
             <>
-              <div className="w-10 h-10 border-3 border-cm-red border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-cm-red border-t-transparent rounded-full animate-spin" />
               <p className="text-sm text-cm-gray-med font-medium">
                 Processing {fileName}...
               </p>
             </>
           ) : (
             <>
-              <div className="w-14 h-14 rounded-full bg-cm-gray-bg/60 flex items-center justify-center">
-                <Upload className="w-6 h-6 text-cm-gray-light" />
+              <div
+                className={`rounded-full bg-cm-gray-bg/60 flex items-center justify-center ${compact ? "w-8 h-8" : "w-14 h-14"}`}
+              >
+                <Upload
+                  className={`text-cm-gray-light ${compact ? "w-4 h-4" : "w-6 h-6"}`}
+                />
               </div>
               <div>
-                <p className="text-sm font-semibold text-cm-charcoal">
-                  Drop your MRP export CSV here
+                <p
+                  className={`font-semibold text-cm-charcoal ${compact ? "text-xs" : "text-sm"}`}
+                >
+                  {label}
                 </p>
-                <p className="text-xs text-cm-gray-light mt-1">
+                <p
+                  className={`text-cm-gray-light mt-0.5 ${compact ? "text-[10px]" : "text-xs"}`}
+                >
                   or click to browse
                 </p>
               </div>
@@ -110,7 +127,7 @@ export function UploadZone({ onFileAccepted, isProcessing }: UploadZoneProps) {
       </div>
 
       {error && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-red-600">
+        <div className="mt-2 flex items-center gap-2 text-sm text-red-600">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
         </div>

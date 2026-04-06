@@ -2,10 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload } from "lucide-react";
+import {
+  Upload,
+  LayoutGrid,
+  ListChecks,
+  AlertTriangle,
+} from "lucide-react";
 import { getActiveSnapshot } from "@/lib/store";
 import { fmtCurrency, fmtDateLong } from "@/lib/format";
 import { MrpGrid } from "@/components/mrp-grid";
+import { ActionsPanel } from "@/components/actions-panel";
 import type { MrpSnapshot } from "@/lib/types";
 
 const BRANCH_NAMES: Record<number, string> = {
@@ -14,10 +20,13 @@ const BRANCH_NAMES: Record<number, string> = {
   3: "Pulaski",
 };
 
+type ViewTab = "grid" | "actions";
+
 export default function DashboardPage() {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<MrpSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ViewTab>("grid");
 
   useEffect(() => {
     const active = getActiveSnapshot();
@@ -51,13 +60,13 @@ export default function DashboardPage() {
               No MRP data loaded
             </h2>
             <p className="text-sm text-cm-gray-light mb-5">
-              Upload your Detailed MRP export CSV to get started.
+              Upload your planning parameters and MRP export CSV to get started.
             </p>
             <button
               onClick={() => router.push("/upload")}
               className="px-5 py-2.5 bg-cm-red text-white text-sm font-semibold rounded-lg hover:bg-cm-red/90 transition-colors cursor-pointer"
             >
-              Upload CSV
+              Upload Data
             </button>
           </div>
         </div>
@@ -71,9 +80,21 @@ export default function DashboardPage() {
   const totalExposure = snapshot.items
     .filter((i) => i.exceptions.includes("SHORTAGE"))
     .reduce((sum, i) => {
-      const minNet = Math.min(...i.weeks.map((w) => w.netPosition));
+      const withinLT = i.weeks.filter((w) => w.weekStart <= i.leadTimeHorizon);
+      const minNet = withinLT.length > 0
+        ? Math.min(...withinLT.map((w) => w.netPosition))
+        : 0;
       return sum + (minNet < 0 ? Math.abs(minNet) * i.stdCost : 0);
     }, 0);
+  const totalActions = snapshot.items.reduce(
+    (sum, i) => sum + i.actions.length,
+    0
+  );
+  const criticalActions = snapshot.items.reduce(
+    (sum, i) =>
+      sum + i.actions.filter((a) => a.urgency === "critical").length,
+    0
+  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -94,6 +115,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-5">
+          {/* Summary stats */}
           <div className="text-center">
             <div
               className={`text-2xl font-bold font-mono ${shortageCount > 0 ? "text-red-400" : "text-cm-green"}`}
@@ -111,6 +133,17 @@ export default function DashboardPage() {
             </div>
             <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
               Exposure
+            </div>
+          </div>
+          <div className="w-px h-8 bg-cm-gray-med" />
+          <div className="text-center">
+            <div
+              className={`text-2xl font-bold font-mono ${criticalActions > 0 ? "text-red-400" : "text-white"}`}
+            >
+              {totalActions}
+            </div>
+            <div className="text-cm-gray-light text-[10px] uppercase tracking-wider">
+              Actions
             </div>
           </div>
           <div className="w-px h-8 bg-cm-gray-med" />
@@ -133,9 +166,44 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200 px-6 flex gap-0">
+        <button
+          onClick={() => setActiveTab("grid")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+            activeTab === "grid"
+              ? "border-cm-red text-cm-charcoal"
+              : "border-transparent text-cm-gray-light hover:text-cm-gray-med"
+          }`}
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          MRP Grid
+        </button>
+        <button
+          onClick={() => setActiveTab("actions")}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+            activeTab === "actions"
+              ? "border-cm-red text-cm-charcoal"
+              : "border-transparent text-cm-gray-light hover:text-cm-gray-med"
+          }`}
+        >
+          <ListChecks className="w-3.5 h-3.5" />
+          Recommended Actions
+          {criticalActions > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-cm-red text-white text-[9px] font-bold">
+              {criticalActions}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Content */}
       <div className="flex-1">
-        <MrpGrid items={snapshot.items} />
+        {activeTab === "grid" ? (
+          <MrpGrid items={snapshot.items} />
+        ) : (
+          <ActionsPanel items={snapshot.items} />
+        )}
       </div>
     </div>
   );
