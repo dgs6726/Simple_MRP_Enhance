@@ -109,7 +109,8 @@ export default function DashboardPage() {
             <p className="text-cm-gray-light text-xs">
               Branch {snapshot.branch} &mdash;{" "}
               {BRANCH_NAMES[snapshot.branch] || "Unknown"} &middot; As of{" "}
-              {fmtDateLong(snapshot.snapshotDate)}
+              {fmtDateLong(snapshot.snapshotDate)}{" "}
+              &middot; <span className="text-cm-gray-med">v0.4.0</span>
             </p>
           </div>
         </div>
