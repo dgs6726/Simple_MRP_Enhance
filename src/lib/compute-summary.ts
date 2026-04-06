@@ -44,7 +44,7 @@ function groupByComponent(rows: MrpDetailRow[]): Map<string, MrpDetailRow[]> {
   return map;
 }
 
-/** Compute weekly buckets for an item's detail rows */
+/** Compute weekly buckets for an item's detail rows, filling gaps with carry-forward */
 function computeWeeklyBuckets(rows: MrpDetailRow[]): WeeklyBucket[] {
   const weekMap = new Map<
     string,
@@ -70,14 +70,52 @@ function computeWeeklyBuckets(rows: MrpDetailRow[]): WeeklyBucket[] {
     weekMap.set(ws, existing);
   }
 
-  return Array.from(weekMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([weekStart, data]) => ({
+  // Sort the weeks that have data
+  const sortedWeeks = Array.from(weekMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (sortedWeeks.length < 2) {
+    return sortedWeeks.map(([weekStart, data]) => ({
       weekStart,
       netPosition: data.netPosition,
       totalDemand: data.totalDemand,
       totalSupply: data.totalSupply,
     }));
+  }
+
+  // Fill gaps: generate every week from first to last, carry forward net position
+  const firstWeek = sortedWeeks[0][0];
+  const lastWeek = sortedWeeks[sortedWeeks.length - 1][0];
+  const result: WeeklyBucket[] = [];
+  let currentWeek = firstWeek;
+  let lastNet = sortedWeeks[0][1].netPosition;
+
+  while (currentWeek <= lastWeek) {
+    const data = weekMap.get(currentWeek);
+    if (data) {
+      lastNet = data.netPosition;
+      result.push({
+        weekStart: currentWeek,
+        netPosition: data.netPosition,
+        totalDemand: data.totalDemand,
+        totalSupply: data.totalSupply,
+      });
+    } else {
+      // No activity this week — carry forward last net position
+      result.push({
+        weekStart: currentWeek,
+        netPosition: lastNet,
+        totalDemand: 0,
+        totalSupply: 0,
+      });
+    }
+    // Advance to next Monday
+    const d = new Date(currentWeek + "T00:00:00");
+    d.setDate(d.getDate() + 7);
+    currentWeek = d.toISOString().split("T")[0];
+  }
+
+  return result;
 }
 
 /** Compute ABC classification for all items */
